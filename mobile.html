@@ -1204,16 +1204,9 @@ function paintMask(out, M, color, amount, kind, tex) {
   }
   ctx.putImageData(id, M.rx, M.ry);
 }
-/* ---------- 眉毛：沿著眉毛走向畫「眉頭淡、眉身實、眉尾細」，粉霧補空隙＋加深原本的眉毛，不蓋成一整塊色 ---------- */
-const BROW_STYLES = [['natural', '自然'], ['mist', '霧眉'], ['feather', '野生眉']];
-// pw 粉霧濃度、st 毛流感、hr 原眉加深、bl 暈染、th 粗細（臉部辨識的眉毛範圍偏粗，所以縮小）
-const BROW_P = { natural: { pw: .85, st: .3, hr: .7, bl: .22, th: .64 }, mist: { pw: 1, st: .08, hr: .5, bl: .34, th: .7 }, feather: { pw: .6, st: .8, hr: .85, bl: .14, th: .6 } };
-function browLine(f, W, H, idx) {
-  // idx：下緣 5 點（眉尾→眉頭）＋上緣 5 點（眉頭→眉尾）；回傳眉頭到眉尾的中線與粗細
-  const lo = idx.slice(0, 5).map(i => P(f, i, W, H)).reverse(), up = idx.slice(5).map(i => P(f, i, W, H));
-  return lo.map((a, i) => ({ x: (a.x + up[i].x) / 2, y: (a.y + up[i].y) / 2, t: dist(a, up[i]) }));
-}
-function browSamples(c, n) {
+/* ========== 美妝引擎 v2：眉毛重塑、眼妝（眼影／眼線／睫毛／美瞳／臥蠶）、口紅質地、整妝 ========== */
+// 共用：曲線取樣（Catmull-Rom）、區域、亂數
+function spline(c, n) {
   const out = [], m = c.length - 1;
   for (let j = 0; j <= n; j++) {
     const s = j / n, u = s * m, i = Math.min(m - 1, u | 0), t = u - i, p0 = c[Math.max(0, i - 1)], p1 = c[i], p2 = c[i + 1], p3 = c[Math.min(m, i + 2)];
@@ -1222,56 +1215,351 @@ function browSamples(c, n) {
   }
   return out;
 }
-function applyBrow(out, f, color, amt, style) {
-  const W = out.width, H = out.height, cfg = BROW_P[style] || BROW_P.natural, fw = fInfo(f, W, H).w, sp = Math.max(1, fw / 420);
-  const [cr, cg, cb] = hex3(color), cl = Math.max(.04, .3 * cr + .59 * cg + .11 * cb), tone = [cr, cg, cb].map(v => clamp(v / cl * .5, 0, 1));
-  [BROW_R, BROW_L].forEach(idx => {
-    const line = browLine(f, W, H, idx), T0 = Math.max(1.5, line.reduce((a, p) => a + p.t, 0) / line.length * cfg.th), sm = browSamples(line, 60);
-    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; sm.forEach(p => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
-    const pad = T0 * 2.5 + 4, rx = Math.max(0, Math.floor(x0 - pad)), ry = Math.max(0, Math.floor(y0 - pad)), rw = Math.min(W, Math.ceil(x1 + pad)) - rx, rh = Math.min(H, Math.ceil(y1 + pad)) - ry;
-    if (rw < 4 || rh < 4) return;
-    const mc = mkCanvas(rw, rh), mx = c2d(mc); mx.fillStyle = '#000'; mx.fillRect(0, 0, rw, rh); mx.globalCompositeOperation = 'lighten';
-    for (const p of sm) {
-      const s = p.s, th = T0 * (s < .55 ? 1 - .12 * s : .93 * (1 - .72 * smoothstep(.55, 1, s)));   // 眉尾漸細
-      const den = (.38 + .62 * smoothstep(0, .38, s)) * (1 - .22 * smoothstep(.82, 1, s));          // 眉頭淡、眉身實
-      const v = Math.round(255 * den); mx.fillStyle = `rgb(${v},${v},${v})`; mx.beginPath(); mx.arc(p.x - rx, p.y - ry, Math.max(.6, th / 2), 0, 7); mx.fill();
+function regionOf(list, pad, W, H) {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; list.forEach(p => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
+  const rx = Math.max(0, Math.floor(x0 - pad)), ry = Math.max(0, Math.floor(y0 - pad)), rw = Math.min(W, Math.ceil(x1 + pad)) - rx, rh = Math.min(H, Math.ceil(y1 + pad)) - ry;
+  return rw < 3 || rh < 3 ? null : { rx, ry, rw, rh };
+}
+// 在區域畫布上畫東西，回傳 0..1 的 alpha（用紅色通道，可疊加）
+function drawAlpha(R, fn, blur = 0) {
+  const c = mkCanvas(R.rw, R.rh), x = c2d(c); x.fillStyle = '#000'; x.fillRect(0, 0, R.rw, R.rh); x.translate(-R.rx, -R.ry); fn(x); x.setTransform(1, 0, 0, 1, 0, 0);
+  const d = x.getImageData(0, 0, R.rw, R.rh).data, n = R.rw * R.rh; let a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = d[i * 4] / 255;
+  return blur > .3 ? blurF(a, R.rw, R.rh, blur, 2) : a;
+}
+const rnd = seed => () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+const nrm = v => { const l = Math.hypot(v.x, v.y) || 1; return { x: v.x / l, y: v.y / l }; };
+const rot = (v, a) => ({ x: v.x * Math.cos(a) - v.y * Math.sin(a), y: v.x * Math.sin(a) + v.y * Math.cos(a) });
+const lumOf = (d, o) => (.3 * d[o] + .59 * d[o + 1] + .11 * d[o + 2]) / 255;
+// 把「往上」的方向轉到往 v 那一側：a 轉向 b 一個角度
+function turnToward(a, b, ang) { const s = a.x * b.y - a.y * b.x >= 0 ? 1 : -1; return rot(a, s * ang); }
+
+/* ---------- 眉毛：先找出本人眉毛真正的位置 → 淡化原本的眉毛 → 在同一個位置畫新眉型（粉霧＋一根根毛流） ---------- */
+const BROW_STYLES = [['enhance', '原生加深'], ['natural', '自然眉'], ['standard', '標準眉'], ['straight', '韓系平眉'], ['willow', '柳葉眉'], ['arch', '挑眉'], ['wild', '野生眉'], ['euro', '歐式眉'], ['sword', '劍眉'], ['thin', '細彎眉'], ['mist', '霧眉'], ['moon', '新月眉']];
+// pk 眉峰位置、ah 眉峰高度、tk 粗細、tail 眉尾變細、len 長度、drop 眉尾下垂（負＝上揚）、fl 毛流量、pw 粉霧、keep 保留本人眉形的比例、up 毛往上梳
+const BROW_DEF = {
+  natural: { pk: .62, ah: .06, tk: 1, tail: .72, len: 1.02, drop: .02, fl: .8, pw: .45, keep: .65 },
+  standard: { pk: .66, ah: .09, tk: 1, tail: .8, len: 1.04, drop: .03, fl: .7, pw: .55, keep: .3 },
+  straight: { pk: .72, ah: .025, tk: 1.12, tail: .55, len: 1.02, drop: -.01, fl: .7, pw: .6, keep: .1 },
+  willow: { pk: .6, ah: .1, tk: .7, tail: .92, len: 1.07, drop: .06, fl: .55, pw: .55, keep: .15 },
+  arch: { pk: .68, ah: .15, tk: .95, tail: .85, len: 1.03, drop: .07, fl: .7, pw: .55, keep: .1 },
+  wild: { pk: .62, ah: .06, tk: 1.2, tail: .6, len: 1.0, drop: .02, fl: 1.35, pw: .25, keep: .5, up: 1 },
+  euro: { pk: .64, ah: .17, tk: 1.15, tail: .8, len: 1.02, drop: .08, fl: .85, pw: .6, keep: .1 },
+  sword: { pk: .82, ah: .07, tk: 1.2, tail: .7, len: 1.05, drop: -.06, fl: .8, pw: .6, keep: .1 },
+  thin: { pk: .58, ah: .11, tk: .58, tail: .9, len: 1.04, drop: .05, fl: .45, pw: .6, keep: .15 },
+  mist: { pk: .64, ah: .07, tk: 1.02, tail: .75, len: 1.03, drop: .03, fl: .2, pw: .95, keep: .5 },
+  moon: { pk: .5, ah: .13, tk: .8, tail: .85, len: 1.03, drop: .09, fl: .55, pw: .55, keep: .1 },
+};
+function browLine(f, W, H, idx) {
+  const lo = idx.slice(0, 5).map(i => P(f, i, W, H)).reverse(), up = idx.slice(5).map(i => P(f, i, W, H));
+  return lo.map((a, i) => ({ x: (a.x + up[i].x) / 2, y: (a.y + up[i].y) / 2, t: dist(a, up[i]) }));
+}
+// 從照片裡找出真正的眉毛：沿著臉部辨識給的眉毛方向，找出比皮膚暗的毛，算出眉頭、眉尾、中線、粗細
+function detectBrow(img, f, W, H, idx, eyeIdx, fw) {
+  const line = browLine(f, W, H, idx), H0 = line[0], T1 = line[4], L0 = dist(H0, T1) || 1, a = { x: (T1.x - H0.x) / L0, y: (T1.y - H0.y) / L0 };
+  const eye = pts(f, eyeIdx, W, H), ec = eye.reduce((s, p) => ({ x: s.x + p.x / eye.length, y: s.y + p.y / eye.length }), { x: 0, y: 0 });
+  let u = { x: a.y, y: -a.x }; if ((H0.x - ec.x) * u.x + (H0.y - ec.y) * u.y < 0) u = { x: -u.x, y: -u.y };   // u：往額頭的方向
+  const tl = clamp(line.reduce((s, p) => s + p.t, 0) / 5, fw * .03, fw * .11);
+  const corners = [-.3, 1.3].flatMap(s => [-1.4, 1.4].map(v => ({ x: H0.x + a.x * L0 * s + u.x * tl * v, y: H0.y + a.y * L0 * s + u.y * tl * v })));
+  const R = regionOf(corners, 2, W, H); if (!R) return null;
+  const d = c2d(img).getImageData(R.rx, R.ry, R.rw, R.rh).data, n = R.rw * R.rh;
+  const eyeA = drawAlpha(R, x => { x.fillStyle = '#fff'; x.strokeStyle = '#fff'; x.lineWidth = fw * .03; x.beginPath(); pathPts(x, eye); x.fill(); x.stroke(); });
+  // 周圍皮膚亮度：取帶狀區域裡偏亮的 60%
+  const vals = []; const S = new Float32Array(n), V = new Float32Array(n);
+  for (let y = 0, i = 0; y < R.rh; y++) for (let x = 0; x < R.rw; x++, i++) { const px = x + R.rx - H0.x, py = y + R.ry - H0.y; S[i] = (px * a.x + py * a.y) / L0; V[i] = px * u.x + py * u.y; if (eyeA[i] < .1) vals.push(lumOf(d, i * 4)); }
+  vals.sort((p, q) => p - q); const Ls = Math.max(.1, vals[Math.floor(vals.length * .7)] || .6);
+  let sr = 0, sg = 0, sb = 0, sc = 0; for (let i = 0; i < n; i++) { const L = lumOf(d, i * 4); if (eyeA[i] < .1 && L > Ls * .92 && L < Ls * 1.12) { sr += d[i * 4]; sg += d[i * 4 + 1]; sb += d[i * 4 + 2]; sc++; } }
+  const skin = sc ? [sr / sc / 255, sg / sc / 255, sb / sc / 255] : [.8, .65, .55];
+  const hair = new Float32Array(n), NB = 24, bw = new Float32Array(NB), bv = new Float32Array(NB), bv2 = new Float32Array(NB);
+  let hr = 0, hg = 0, hb = 0, hc = 0;
+  for (let i = 0; i < n; i++) {
+    const s = S[i], v = V[i] / tl; if (s < -.3 || s > 1.3 || Math.abs(v) > 1.4) continue;
+    const h = smoothstep(.07, .3, (Ls - lumOf(d, i * 4)) / Ls) * (1 - smoothstep(.9, 1.4, Math.abs(v))) * (1 - eyeA[i]); hair[i] = h;
+    if (h > .5) { hr += d[i * 4]; hg += d[i * 4 + 1]; hb += d[i * 4 + 2]; hc++; }
+    const b = Math.floor((s + .3) / 1.6 * NB); if (b >= 0 && b < NB) { bw[b] += h; bv[b] += h * V[i]; bv2[b] += h * V[i] * V[i]; }
+  }
+  const mx = Math.max(...bw), ok = b => bw[b] > mx * .22 && mx > tl * .8;
+  let bm = 0; for (let b = 0; b < NB; b++) if (bw[b] > bw[bm]) bm = b; let b0 = -1, b1 = -1; if (ok(bm)) { b0 = b1 = bm; while (b0 > 0 && ok(b0 - 1)) b0--; while (b1 < NB - 1 && ok(b1 + 1)) b1++; }
+  const sOf = b => (b + .5) / NB * 1.6 - .3, vOf = b => bw[b] > 1e-3 ? bv[b] / bw[b] : 0;
+  const found = b0 >= 0 && b1 - b0 >= NB * .3;
+  let sh = 0, st = 1, vh = 0, vt = 0, th = tl * .62, cline = null;
+  if (found) {
+    sh = clamp(sOf(b0), -.12, .2); st = clamp(sOf(b1), .8, 1.08); vh = vOf(b0); vt = vOf(b1);
+    let tw = 0, ts = 0; for (let b = b0; b <= b1; b++) { const vr = Math.max(0, bv2[b] / Math.max(1e-3, bw[b]) - vOf(b) ** 2); ts += bw[b] * Math.sqrt(vr) * 3; tw += bw[b]; }
+    th = clamp(ts / Math.max(1e-3, tw), tl * .35, tl * 1.1);
+    cline = []; for (let k = 0; k <= 8; k++) { const s = sh + (st - sh) * k / 8, bb = clamp(Math.round((s + .3) / 1.6 * NB - .5), b0, b1); let w = 0, v = 0; for (let j = bb - 1; j <= bb + 1; j++) if (j >= b0 && j <= b1) { w += bw[j]; v += bv[j]; } cline.push({ s, v: w > 1e-3 ? v / w : 0 }); }
+  }
+  const at = (s, v) => ({ x: H0.x + a.x * L0 * s + u.x * v, y: H0.y + a.y * L0 * s + u.y * v });
+  return { R, d, hair, S, V, a, u, L0, H0, tl, th, Ls, skin, found, Hd: at(sh, vh), Td: at(st, vt), cline, at, hcol: hc > 20 ? [hr / hc / 255, hg / hc / 255, hb / hc / 255] : null, lm: line };
+}
+function browShape(D, cfg) {
+  // 新眉型的中線（眉頭→眉尾）與每一點的粗細／濃度
+  const Hd = D.Hd, Td = D.Td, L = dist(Hd, Td) * cfg.len || 1, a = nrm({ x: Td.x - Hd.x, y: Td.y - Hd.y }), u = D.u, pts2 = [];
+  for (let k = 0; k <= 40; k++) {
+    const s = k / 40, bump = s < cfg.pk ? Math.pow(Math.sin(Math.PI / 2 * s / cfg.pk), 1.2) : Math.cos(Math.PI / 2 * (s - cfg.pk) / (1 - cfg.pk));
+    let off = L * (cfg.ah * bump - cfg.drop * smoothstep(cfg.pk, 1, s)), x = Hd.x + a.x * L * s + u.x * off, y = Hd.y + a.y * L * s + u.y * off;
+    if (D.cline && cfg.keep > 0) { // 跟本人眉形混合，保留原本的特色
+      const ss = D.cline[0].s + (D.cline[8].s - D.cline[0].s) * Math.min(1, s / cfg.len), q = D.cline.reduce((best, c) => Math.abs(c.s - ss) < Math.abs(best.s - ss) ? c : best), o = D.at(ss, q.v);
+      x += (o.x - x) * cfg.keep; y += (o.y - y) * cfg.keep;
     }
-    const n = rw * rh, md = mx.getImageData(0, 0, rw, rh).data; let M = new Float32Array(n); for (let i = 0; i < n; i++) M[i] = md[i * 4] / 255;
-    M = blurF(M, rw, rh, Math.max(1, T0 * cfg.bl), 2);
-    const ctx = c2d(out), id = ctx.getImageData(rx, ry, rw, rh), d = id.data, lum = i => (.3 * d[i * 4] + .59 * d[i * 4 + 1] + .11 * d[i * 4 + 2]) / 255;
-    // 周圍皮膚的亮度（排除頭髮、眼睛等暗的地方），用來判斷哪裡是原本的眉毛
-    let s1 = 0, c1 = 0; for (let i = 0; i < n; i++) if (M[i] < .02) { s1 += lum(i); c1++; }
-    const m1 = c1 ? s1 / c1 : .6; let s2 = 0, c2 = 0; for (let i = 0; i < n; i++) if (M[i] < .02) { const L = lum(i); if (L > m1 * .9) { s2 += L; c2++; } }
-    const Ls = Math.max(.08, c2 ? s2 / c2 : m1), a0 = sm[0], a1 = sm[sm.length - 1], an = Math.atan2(a1.y - a0.y, a1.x - a0.x), ca = Math.cos(an), sa = Math.sin(an);
-    for (let y = 0, i = 0; y < rh; y++) for (let x = 0; x < rw; x++, i++) {
-      const m = M[i] * amt; if (m < .004) continue;
-      const o = i * 4, r = d[o] / 255, g = d[o + 1] / 255, b = d[o + 2] / 255, L = .3 * r + .59 * g + .11 * b;
-      const X = x + rx, Y = y + ry, al = (X * ca + Y * sa) / sp, ac = (Y * ca - X * sa) / sp, row = Math.floor(ac / 1.1);
-      const nz = hash2(Math.floor(al / 7 + row * .37), row);                       // 順著眉毛方向的細毛流
-      const hair = smoothstep(.05, .3, (Ls - L) / Ls);                                // 越暗越像原本的眉毛
-      const dd = m * cfg.pw * (1 - cfg.st * .5 + cfg.st * nz);
-      let R = r * (1 - dd * (1 - tone[0])), G = g * (1 - dd * (1 - tone[1])), B = b * (1 - dd * (1 - tone[2])); // 皮膚上：淡淡一層眉粉
-      const kL = L / cl * (1 - .18 * m), hk = m * cfg.hr;                             // 眉毛上：換成眉色、稍微加深，亮度跟著原本的毛
-      R += (Math.min(1, r + (cr * kL - r) * hk) - R) * hair; G += (Math.min(1, g + (cg * kL - g) * hk) - G) * hair; B += (Math.min(1, b + (cb * kL - b) * hk) - B) * hair;
-      d[o] = R * 255; d[o + 1] = G * 255; d[o + 2] = B * 255;
+    const th = D.th * cfg.tk * (s < cfg.pk ? 1 - .1 * s : 1 - cfg.tail * smoothstep(cfg.pk, 1, s)), den = (.32 + .68 * smoothstep(0, .36, s)) * (1 - .25 * smoothstep(.82, 1, s));
+    pts2.push({ x, y, s, th: Math.max(D.th * .12, th), den });
+  }
+  for (let k = 0; k < pts2.length; k++) { const p = pts2[Math.max(0, k - 1)], q = pts2[Math.min(pts2.length - 1, k + 1)]; pts2[k].t = nrm({ x: q.x - p.x, y: q.y - p.y }); }
+  return pts2;
+}
+function applyBrow(out, f, color, amt, style, faces) {
+  const W = out.width, H = out.height, fw = fInfo(f, W, H).w, sp = Math.max(.6, fw / 420), cfg = BROW_DEF[style] || BROW_DEF.natural, enh = style === 'enhance';
+  const Ds = [detectBrow(out, f, W, H, BROW_R, EYE_R, fw), detectBrow(out, f, W, H, BROW_L, EYE_L, fw)].filter(Boolean);
+  if (Ds.length === 2) { const t = (Ds[0].th + Ds[1].th) / 2; Ds.forEach(D => D.th = D.th * .4 + t * .6); } // 兩邊粗細一致
+  Ds.forEach((D, side) => {
+    const R = D.R, n = R.rw * R.rh, d = c2d(out).getImageData(R.rx, R.ry, R.rw, R.rh).data, base = Float32Array.from(d); // 重新讀：兩邊眉毛的範圍可能重疊
+    let col = hex3(color === 'auto' ? '#4a3427' : color); if (color === 'auto' && D.hcol) { const h = rgb2hsl(...D.hcol, [0, 0, 0]), hh = h[1] < .08 ? 25 : clamp(h[0], 10, 40); col = hsl2rgb(hh, clamp(h[1] * 1.3, .22, .45), clamp(h[2] * .75, .14, .3), [0, 0, 0]); }
+    const ratio = col.map((v, c) => clamp(v / Math.max(.05, D.skin[c]), 0, 1));
+    let shape = null;
+    if (enh) { // 原生加深：照本人眉毛中線補空隙
+      const c = D.cline || [{ s: 0, v: 0 }, { s: 1, v: 0 }]; shape = c.map((q, k) => ({ ...D.at(q.s, q.v), s: k / (c.length - 1), th: D.th * (1 - .55 * smoothstep(.6, 1, k / (c.length - 1))), den: .45 + .55 * smoothstep(0, .35, k / (c.length - 1)) }));
+      shape = spline(shape, 40).map((p, k, arr) => { const t = k / 40, i = Math.min(shape.length - 2, Math.floor(t * (shape.length - 1))), w = t * (shape.length - 1) - i; return { ...p, th: shape[i].th * (1 - w) + shape[i + 1].th * w, den: shape[i].den * (1 - w) + shape[i + 1].den * w }; });
+      for (let k = 0; k < shape.length; k++) { const p = shape[Math.max(0, k - 1)], q = shape[Math.min(shape.length - 1, k + 1)]; shape[k].t = nrm({ x: q.x - p.x, y: q.y - p.y }); }
+    } else shape = browShape(D, cfg);
+    // 眉型範圍（粉霧濃度）
+    const env = drawAlpha(R, x => { x.globalCompositeOperation = 'lighten'; for (const p of shape) { const v = Math.round(255 * p.den); x.fillStyle = `rgb(${v},${v},${v})`; x.beginPath(); x.arc(p.x, p.y, Math.max(.6, p.th / 2), 0, 7); x.fill(); } }, Math.max(.8, D.th * .18));
+    // 淡化原本的眉毛：用周圍皮膚補（新眉型蓋到的地方少淡化一點，保留真的毛）
+    if (!enh) {
+      const hd = blurF(D.hair, R.rw, R.rh, Math.max(1, D.th * .35), 2), wt = new Float32Array(n), rad = Math.max(2, D.th * 1.1);
+      for (let i = 0; i < n; i++) wt[i] = 1 - clamp(hd[i] * 2.5, 0, 1);
+      const ch = [0, 1, 2].map(c => { const a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = base[i * 4 + c] * wt[i]; return blurF(a, R.rw, R.rh, rad, 3); }), ww = blurF(wt, R.rw, R.rh, rad, 3);
+      for (let i = 0; i < n; i++) {
+        const cz = clamp(hd[i] * 2.5, 0, 1) * (1 - .55 * env[i]) * Math.min(1, amt * 1.25) * .95; if (cz < .01 || ww[i] < .02) continue;
+        const g = (hash2(i % R.rw, (i / R.rw) | 0) - .5) * 4;
+        for (let c = 0; c < 3; c++) d[i * 4 + c] = base[i * 4 + c] + (ch[c][i] / ww[i] + g - base[i * 4 + c]) * cz;
+      }
     }
-    ctx.putImageData(id, rx, ry);
+    // 毛流：一根一根畫，眉頭往上、眉身斜向眉尾、上半部往下、下半部往上，在中間交會
+    const rng = rnd(1234 + side * 77), Ltot = shape.reduce((s, p, k) => k ? s + dist(p, shape[k - 1]) : 0, 0), hw = Math.max(.5, sp * .55);
+    const N = Math.round(Ltot / Math.max(.5, sp * 1.1) * clamp(D.th / (sp * 5), 1, 4) * cfg.fl * (enh ? .7 : 1));
+    const hairA = drawAlpha(R, x => {
+      x.strokeStyle = '#fff'; x.lineCap = 'round';
+      for (let j = 0; j < N; j++) {
+        const s = Math.pow(rng(), .9), k = Math.min(shape.length - 1, Math.round(s * (shape.length - 1))), p = shape[k], v = (rng() - .5) * .9;
+        const root = { x: p.x + D.u.x * v * p.th, y: p.y + D.u.y * v * p.th };
+        let ang = (s < .2 ? .95 - s * 2.5 : .28) - v * .5 + (cfg.up ? .45 : 0) + (rng() - .5) * .2;   // 與眉毛走向的夾角
+        const dir = turnToward(p.t, D.u, ang), len = Math.max(sp * 3, p.th * (.6 + .5 * rng()) * (s < .2 ? .65 : 1));
+        const mid = { x: root.x + dir.x * len * .5 + p.t.x * len * .12, y: root.y + dir.y * len * .5 + p.t.y * len * .12 }, tip = { x: root.x + dir.x * len + p.t.x * len * .3, y: root.y + dir.y * len + p.t.y * len * .3 };
+        const g = Math.round(150 + 105 * rng()); x.strokeStyle = `rgb(${g},${g},${g})`;
+        x.lineWidth = hw * 1.25; x.beginPath(); x.moveTo(root.x, root.y); x.quadraticCurveTo(mid.x, mid.y, (mid.x + tip.x) / 2, (mid.y + tip.y) / 2); x.stroke();
+        x.lineWidth = hw * .7; x.beginPath(); x.moveTo((mid.x + tip.x) / 2, (mid.y + tip.y) / 2); x.lineTo(tip.x, tip.y); x.stroke();
+      }
+    });
+    const envSoft = blurF(env, R.rw, R.rh, Math.max(1, D.th * .25), 2);
+    for (let i = 0; i < n; i++) {
+      const e = envSoft[i], h0 = D.hair[i]; if (e < .01 && hairA[i] < .01) continue;
+      const o = i * 4, pw = e * (.35 + cfg.pw * .65) * (enh ? .7 : 1) * .8 * amt, hs = Math.min(1, hairA[i] * smoothstep(.12, .55, e)) * .6 * amt;
+      let r = d[o] / 255, g = d[o + 1] / 255, b = d[o + 2] / 255;
+      r *= 1 - pw * (1 - ratio[0]); g *= 1 - pw * (1 - ratio[1]); b *= 1 - pw * (1 - ratio[2]);                          // 粉霧
+      if (enh) { const k = h0 * e * .5 * amt; r *= 1 - k * (1 - ratio[0]) * .6; g *= 1 - k * (1 - ratio[1]) * .6; b *= 1 - k * (1 - ratio[2]) * .6; } // 原本的毛加深
+      const vr = .85 + .3 * hash2(i, 7); r += (col[0] * vr - r) * hs; g += (col[1] * vr - g) * hs; b += (col[2] * vr - b) * hs;   // 毛流
+      d[o] = r * 255; d[o + 1] = g * 255; d[o + 2] = b * 255;
+    }
+    c2d(out).putImageData(new ImageData(d, R.rw, R.rh), R.rx, R.ry);
   });
+}
+
+/* ---------- 眼部座標 ---------- */
+function eyeFrame(f, W, H, side) {
+  const oI = side ? 263 : 33, iI = side ? 362 : 133, ic = side ? 473 : 468, F = faceFrame(f, W, H);
+  const O = P(f, oI, W, H), I = P(f, iI, W, H), ew = dist(O, I) || 1, ax = { x: (O.x - I.x) / ew, y: (O.y - I.y) / ew };
+  let up = { x: ax.y, y: -ax.x }; if (up.x * F.v.x + up.y * F.v.y > 0) up = { x: -up.x, y: -up.y };
+  const upper = (side ? UPPER_L : UPPER_R).map(k => P(f, k, W, H)).reverse(), lower = (side ? LOWER_L : LOWER_R).map(k => P(f, k, W, H)).reverse(); // 內→外
+  let iris = null; if (f.length > ic + 4) { const c = P(f, ic, W, H); iris = { c, r: [1, 2, 3, 4].reduce((s, k) => s + dist(c, P(f, ic + k, W, H)), 0) / 4 }; }
+  return { O, I, ew, ax, up, upper: spline(upper, 48), lower: spline(lower, 48), poly: pts(f, side ? EYE_L : EYE_R, W, H), iris, fw: F.fw };
+}
+const normalAt = (c, k, up) => { const p = c[Math.max(0, k - 1)], q = c[Math.min(c.length - 1, k + 1)]; let nn = nrm({ x: -(q.y - p.y), y: q.x - p.x }); if (nn.x * up.x + nn.y * up.y < 0) nn = { x: -nn.x, y: -nn.y }; return nn; };
+// 眼睛開口（不要畫到眼球上）
+const eyeHole = (E, R, grow = 0) => drawAlpha(R, x => { x.fillStyle = '#fff'; x.strokeStyle = '#fff'; x.lineJoin = 'round'; x.lineWidth = Math.max(.5, grow); x.beginPath(); pathPts(x, E.poly); x.fill(); if (grow > 0) x.stroke(); }, Math.max(.6, E.ew * .012));
+// 共用的上色：kind = shadow / liner / lash / aegyo
+function paintRegion(out, R, A, color, amt, kind, tex) {
+  const ctx = c2d(out), id = ctx.getImageData(R.rx, R.ry, R.rw, R.rh), d = id.data, [cr, cg, cb] = hex3(color), sp = Math.max(1, R.sp || 1);
+  for (let y = 0, i = 0; y < R.rh; y++) for (let x = 0; x < R.rw; x++, i++) {
+    const a = A[i] * amt; if (a < .004) continue;
+    const o = i * 4, r = d[o] / 255, g = d[o + 1] / 255, b = d[o + 2] / 255, L = .3 * r + .59 * g + .11 * b; let R2, G2, B2;
+    if (kind === 'liner' || kind === 'lash') { const k = Math.min(1, a); R2 = r + (r * cr * .35 + cr * .65 * Math.min(1, L * 1.4) - r) * k; G2 = g + (g * cg * .35 + cg * .65 * Math.min(1, L * 1.4) - g) * k; B2 = b + (b * cb * .35 + cb * .65 * Math.min(1, L * 1.4) - b) * k; }
+    else if (kind === 'aegyo') { const k = Math.min(1, a) * .5, f = 1 + k * .9; R2 = Math.min(1, r * f + k * .04 * cr); G2 = Math.min(1, g * f + k * .04 * cg); B2 = Math.min(1, b * f + k * .04 * cb); if (tex === 'glitter') { const h = hash2(Math.floor((R.rx + x) / sp), Math.floor((R.ry + y) / sp)), s = h > .93 ? (h - .93) * 14 * k : 0; R2 += s * (1 - R2); G2 += s * (1 - G2); B2 += s * (1 - B2); } }
+    else { // 眼影：疊色保留皮膚紋理
+      const k = Math.min(1, a), sr = softL(r, cr), sg = softL(g, cg), sb = softL(b, cb), mr = r * cr, mg = g * cg, mb = b * cb;
+      R2 = r + (sr * .55 + mr * .45 - r) * k; G2 = g + (sg * .55 + mg * .45 - g) * k; B2 = b + (sb * .55 + mb * .45 - b) * k;
+      if (tex === 'satin') { const s = .1 * k * smoothstep(.4, .8, L); R2 += s * (1 - R2); G2 += s * (1 - G2); B2 += s * (1 - B2); }
+      if (tex === 'shimmer') { const h = hash2(Math.floor((R.rx + x) / sp), Math.floor((R.ry + y) / sp)), s = (h > .9 ? (h - .9) * 9 : 0) * k + .05 * k; R2 += s * (1 - R2) * (.8 + .2 * cr); G2 += s * (1 - G2) * (.8 + .2 * cg); B2 += s * (1 - B2) * (.8 + .2 * cb); }
+    }
+    d[o] = R2 * 255; d[o + 1] = G2 * 255; d[o + 2] = B2 * 255;
+  }
+  ctx.putImageData(id, R.rx, R.ry);
+}
+/* ---------- 眼影 ---------- */
+const SHADOW_STYLES = [['wash', '單色暈染'], ['grad', '漸層'], ['outer', '眼尾加深'], ['smoky', '小煙燻'], ['glitter', '珠光亮片'], ['peach', '桃花下眼影'], ['lower', '下眼尾'], ['full', '全包圍']];
+const SHADOW_TEX = [['matte', '霧面'], ['satin', '緞光'], ['shimmer', '亮片']];
+function applyShadow(out, E, color, amt, style, tex) {
+  const W = out.width, H = out.height, ew = E.ew, R = regionOf([...E.poly, { x: E.O.x + E.up.x * ew * .75 + E.ax.x * ew * .35, y: E.O.y + E.up.y * ew * .75 + E.ax.y * ew * .35 }, { x: E.I.x + E.up.x * ew * .7, y: E.I.y + E.up.y * ew * .7 }], ew * .45, W, H); if (!R) return;
+  R.sp = Math.max(1, E.fw / 380); const n = R.rw * R.rh, A = new Float32Array(n), hole = eyeHole(E, R), U = E.upper, Lw = E.lower;
+  const near = (c, px, py) => { let bi = 0, bd = 1e18; for (let k = 0; k < c.length; k += 2) { const dd = (c[k].x - px) ** 2 + (c[k].y - py) ** 2; if (dd < bd) { bd = dd; bi = k; } } return bi; };
+  for (let y = 0, i = 0; y < R.rh; y++) for (let x = 0; x < R.rw; x++, i++) {
+    const px = x + R.rx, py = y + R.ry, ku = near(U, px, py), kl = near(Lw, px, py);
+    const hu = ((px - U[ku].x) * E.up.x + (py - U[ku].y) * E.up.y) / ew, hl = -((px - Lw[kl].x) * E.up.x + (py - Lw[kl].y) * E.up.y) / ew;
+    const ux = ((px - E.O.x) * E.ax.x + (py - E.O.y) * E.ax.y) / ew, s = ux > 0 ? 1 + ux : U[ku].s, sl = ux > 0 ? 1 + ux : Lw[kl].s;
+    const side = smoothstep(-.02, .12, s) * (1 - smoothstep(1.12, 1.32, s)), top = 1 - smoothstep(.42, .62, hu);
+    let w = 0;
+    if (hu > -.05) {
+      if (style === 'wash' || style === 'peach' || style === 'lower') w = (1 - smoothstep(.06, .4, hu)) * side * (style === 'wash' ? 1 : .45);
+      else if (style === 'grad') w = (1 - smoothstep(0, .34, hu)) * side;
+      else if (style === 'outer') w = ((1 - smoothstep(.06, .36, hu)) * .45 + smoothstep(.45, .95, s) * (1 - smoothstep(.04, .3, hu - (s - .6) * .2))) * side;
+      else if (style === 'smoky' || style === 'full') w = (1 - smoothstep(.04, .48, hu)) * side * (style === 'smoky' ? 1.1 : .9);
+      else if (style === 'glitter') w = (1 - smoothstep(.06, .38, hu)) * side * .6;
+      w *= top;
+    } else if (hl > -.05) {
+      const sl2 = smoothstep(-.02, .12, sl) * (1 - smoothstep(1.08, 1.25, sl));
+      if (style === 'peach') w = (1 - smoothstep(.02, .3, hl)) * sl2 * .85;
+      else if (style === 'lower' || style === 'smoky') w = (1 - smoothstep(.02, .14, hl)) * smoothstep(.45, .85, sl) * sl2 * (style === 'smoky' ? .9 : 1);
+      else if (style === 'full') w = (1 - smoothstep(.02, .12, hl)) * sl2 * .7;
+    }
+    A[i] = clamp(w, 0, 1) * (1 - hole[i]);
+  }
+  const Ab = blurF(A, R.rw, R.rh, Math.max(1, ew * .025), 2);
+  paintRegion(out, R, Ab, color, amt * .85, 'shadow', style === 'glitter' ? 'shimmer' : tex);
+}
+/* ---------- 眼線 ---------- */
+const LINER_STYLES = [['inner', '內眼線'], ['natural', '自然'], ['flat', '平拉'], ['cat', '上揚貓眼'], ['puppy', '下垂狗狗眼'], ['flick', '小翹尾'], ['smoky', '暈染'], ['full', '全框']];
+// w0 眼頭粗、w1 眼尾粗（×眼寬）、tail 眼尾長度、ang 眼尾角度（正＝上揚）、lo 下眼線、sm 暈開
+const LINER_DEF = { inner: { w0: .008, w1: .018, tail: 0, ang: 0 }, natural: { w0: .01, w1: .035, tail: .1, ang: .25 }, flat: { w0: .012, w1: .045, tail: .2, ang: .05 }, cat: { w0: .012, w1: .06, tail: .32, ang: .5 }, puppy: { w0: .012, w1: .05, tail: .2, ang: -.25 }, flick: { w0: .01, w1: .04, tail: .13, ang: .55 }, smoky: { w0: .02, w1: .06, tail: .12, ang: .2, lo: .5, sm: 1 }, full: { w0: .014, w1: .04, tail: .08, ang: .15, lo: 1 } };
+function applyLiner(out, E, color, amt, style) {
+  const W = out.width, H = out.height, ew = E.ew, c = LINER_DEF[style] || LINER_DEF.natural, U = E.upper;
+  const tipDir = turnToward(E.ax, E.up, c.ang), tip = { x: E.O.x + tipDir.x * ew * c.tail, y: E.O.y + tipDir.y * ew * c.tail };
+  const R = regionOf([...E.poly, tip], ew * .2, W, H); if (!R) return;
+  const top = [], bot = [];
+  U.forEach((p, k) => { const s = p.s, w = ew * (c.w0 + (c.w1 - c.w0) * Math.pow(s, 1.6)) * smoothstep(0, .1, s + .02), nn = normalAt(U, k, E.up); top.push({ x: p.x + nn.x * w * .85, y: p.y + nn.y * w * .85 }); bot.push({ x: p.x - nn.x * w * .15, y: p.y - nn.y * w * .15 }); });
+  let A = drawAlpha(R, x => {
+    x.fillStyle = '#fff'; x.beginPath(); x.moveTo(bot[0].x, bot[0].y); top.forEach(p => x.lineTo(p.x, p.y)); if (c.tail > 0) x.lineTo(tip.x, tip.y); for (let k = bot.length - 1; k >= 0; k--) x.lineTo(bot[k].x, bot[k].y); x.closePath(); x.fill();
+    if (c.lo) { const Lw = E.lower; x.strokeStyle = '#bbb'; x.lineCap = 'round'; for (let k = 1; k < Lw.length; k++) { const s = Lw[k].s; if (s < 1 - c.lo) continue; x.lineWidth = ew * .016 * smoothstep(1 - c.lo, 1 - c.lo + .2, s); x.beginPath(); x.moveTo(Lw[k - 1].x, Lw[k - 1].y); x.lineTo(Lw[k].x, Lw[k].y); x.stroke(); } }
+  }, Math.max(.5, ew * (c.sm ? .03 : .004)));
+  if (c.sm) { const B = blurF(A, R.rw, R.rh, ew * .05, 2); for (let i = 0; i < A.length; i++) A[i] = Math.max(A[i], B[i] * .8); }
+  const hole = eyeHole(E, R); for (let i = 0; i < A.length; i++) A[i] *= 1 - hole[i] * .85;
+  paintRegion(out, R, A, color, amt * .95, 'liner');
+}
+/* ---------- 睫毛 ---------- */
+const LASH_STYLES = [['natural', '自然'], ['curl', '捲翹'], ['dense', '濃密'], ['separate', '根根分明'], ['fairy', '仙子毛'], ['doll', '洋娃娃'], ['cat', '眼尾加長'], ['lower', '加下睫毛']];
+// n 根數、len 長度（×眼寬）、w 粗細、curl 捲度、outer 越外側越長、cl 簇狀、lo 下睫毛
+const LASH_DEF = { natural: { n: 34, len: .2, w: .011, curl: .5, outer: .5 }, curl: { n: 38, len: .25, w: .012, curl: .95, outer: .5 }, dense: { n: 60, len: .24, w: .015, curl: .6, outer: .45 }, separate: { n: 26, len: .26, w: .013, curl: .6, outer: .5 }, fairy: { n: 48, len: .24, w: .011, curl: .65, outer: .5, cl: 4 }, doll: { n: 46, len: .27, w: .013, curl: .75, outer: .1, lo: .7 }, cat: { n: 40, len: .25, w: .012, curl: .55, outer: 1.1 }, lower: { n: 36, len: .22, w: .012, curl: .55, outer: .5, lo: .5 } };
+function lashStroke(x, root, dir, curlDir, len, w, curl) {
+  const c1 = { x: root.x + dir.x * len * .5, y: root.y + dir.y * len * .5 }, d2 = rot(dir, 0), t = { x: root.x + (dir.x * .75 + curlDir.x * .45 * curl) * len, y: root.y + (dir.y * .75 + curlDir.y * .45 * curl) * len };
+  const N = 7, L = [], Rr = [];
+  for (let i = 0; i <= N; i++) { const s = i / N, q = { x: (1 - s) ** 2 * root.x + 2 * (1 - s) * s * c1.x + s * s * t.x, y: (1 - s) ** 2 * root.y + 2 * (1 - s) * s * c1.y + s * s * t.y }, tg = nrm({ x: 2 * (1 - s) * (c1.x - root.x) + 2 * s * (t.x - c1.x), y: 2 * (1 - s) * (c1.y - root.y) + 2 * s * (t.y - c1.y) }), ww = w * Math.pow(1 - s, .8) / 2 + .15; L.push({ x: q.x - tg.y * ww, y: q.y + tg.x * ww }); Rr.push({ x: q.x + tg.y * ww, y: q.y - tg.x * ww }); }
+  x.beginPath(); L.forEach((p, i) => i ? x.lineTo(p.x, p.y) : x.moveTo(p.x, p.y)); for (let i = Rr.length - 1; i >= 0; i--) x.lineTo(Rr[i].x, Rr[i].y); x.closePath(); x.fill();
+}
+function applyLash(out, E, color, amt, style, seed) {
+  const W = out.width, H = out.height, ew = E.ew, c = LASH_DEF[style] || LASH_DEF.natural, U = E.upper, rng = rnd(seed);
+  const R = regionOf([...E.poly, { x: E.O.x + E.up.x * ew * .45 + E.ax.x * ew * .3, y: E.O.y + E.up.y * ew * .45 + E.ax.y * ew * .3 }, { x: E.I.x + E.up.x * ew * .4, y: E.I.y + E.up.y * ew * .4 }], ew * .25, W, H); if (!R) return;
+  const w0 = Math.max(.7, ew * c.w);
+  const A = drawAlpha(R, x => {
+    x.fillStyle = '#fff'; let clTip = null;
+    for (let j = 0; j < c.n; j++) {
+      const s = .1 + .9 * (j + rng() * .8) / c.n, k = Math.min(U.length - 1, Math.round(s * (U.length - 1))), p = U[k], nn = normalAt(U, k, E.up);
+      const tilt = (s - .3) * .9 + (rng() - .5) * .12, dir = turnToward(nn, E.ax, Math.max(-.2, tilt) * (style === 'cat' ? 1.2 : 1));
+      let len = ew * c.len * (.55 + .45 * smoothstep(.05, .7, s) + c.outer * .3 * smoothstep(.6, 1, s)) * (1 + (rng() - .5) * .22);
+      if (c.cl) { const main = Math.floor(j / c.cl) % 2 === 0; if (j % c.cl === 0) clTip = { x: p.x + dir.x * len * (main ? 1.08 : .85), y: p.y + dir.y * len * (main ? 1.08 : .85) }; const own = { x: p.x + dir.x * len * .9, y: p.y + dir.y * len * .9 }, tp = { x: own.x + (clTip.x - own.x) * .55, y: own.y + (clTip.y - own.y) * .55 }; lashStroke(x, p, nrm({ x: tp.x - p.x, y: tp.y - p.y }), E.up, dist(p, tp), w0 * .85, c.curl * .7); continue; }
+      lashStroke(x, { x: p.x - nn.x * ew * .006, y: p.y - nn.y * ew * .006 }, dir, E.up, len, w0 * (.8 + .4 * rng()), c.curl);
+    }
+    if (c.lo) { const Lw = E.lower; for (let j = 0; j < 22; j++) { const s = .3 + .7 * (j + rng()) / 22; if (s < 1 - c.lo) continue; const k = Math.min(Lw.length - 1, Math.round(s * (Lw.length - 1))), p = Lw[k], nn = normalAt(Lw, k, E.up), dn = turnToward({ x: -nn.x, y: -nn.y }, E.ax, -(s - .4) * .6); lashStroke(x, p, dn, { x: -E.up.x, y: -E.up.y }, ew * .085 * (.7 + .5 * s) * (1 + (rng() - .5) * .3), w0 * .7, .2); } }
+  }, .35);
+  const hole = eyeHole(E, R); for (let i = 0; i < A.length; i++) A[i] *= 1 - hole[i] * .6;
+  paintRegion(out, R, A, color, amt, 'lash');
+}
+/* ---------- 美瞳 ---------- */
+const LENS_STYLES = [['natural', '自然'], ['big', '放大'], ['mixed', '混血'], ['grad', '漸層'], ['ring', '亮環']];
+function applyLens(out, E, color, amt, style) {
+  if (!E.iris) return; const W = out.width, H = out.height, { c, r } = E.iris, R = regionOf([{ x: c.x - r * 1.3, y: c.y - r * 1.3 }, { x: c.x + r * 1.3, y: c.y + r * 1.3 }], 2, W, H); if (!R) return;
+  const open = drawAlpha(R, x => { x.fillStyle = '#fff'; x.beginPath(); pathPts(x, E.poly); x.fill(); }, Math.max(.6, r * .08));
+  const ctx = c2d(out), id = ctx.getImageData(R.rx, R.ry, R.rw, R.rh), d = id.data, [cr, cg, cb] = hex3(color), hsC = rgb2hsl(cr, cg, cb, [0, 0, 0]);
+  const size = style === 'big' ? 1.06 : 1, ring = style === 'big' ? .55 : style === 'ring' ? .25 : .3, mixed = style === 'mixed', o2 = [0, 0, 0];
+  for (let y = 0, i = 0; y < R.rh; y++) for (let x = 0; x < R.rw; x++, i++) {
+    const dx = x + R.rx - c.x, dy = y + R.ry - c.y, dd = Math.hypot(dx, dy) / (r * size); if (dd > 1.1) continue;
+    let m = (1 - smoothstep(.93, 1.04, dd)) * smoothstep(.3, .45, dd) * open[i]; if (style === 'grad') m *= smoothstep(.45, .8, dd); if (m < .01) continue;
+    const o = i * 4, rr = d[o] / 255, g = d[o + 1] / 255, b = d[o + 2] / 255, L = .3 * rr + .59 * g + .11 * b; m *= 1 - smoothstep(.55, .8, L); // 保留眼睛的反光
+    const ang = Math.atan2(dy, dx), nsec = Math.max(10, Math.round(r * 1.2)), streak = 1 + (hash2(Math.floor((ang + 4) / 6.2832 * nsec), 3) - .5) * (mixed ? .3 : .14);
+    let Lt = clamp((L + (hsC[2] * (mixed ? .62 : .5) - L) * .5) * streak, 0, .8); if (style === 'ring') Lt *= 1 + .35 * smoothstep(.5, .8, dd) * (1 - smoothstep(.82, .92, dd));
+    Lt *= 1 - ring * smoothstep(.78, .95, dd);
+    hsl2rgb(hsC[0], Math.min(1, hsC[1] * (mixed ? .7 : .85)), Lt, o2); const k = m * amt * .78;
+    d[o] = (rr + (o2[0] - rr) * k) * 255; d[o + 1] = (g + (o2[1] - g) * k) * 255; d[o + 2] = (b + (o2[2] - b) * k) * 255;
+  }
+  ctx.putImageData(id, R.rx, R.ry);
+}
+/* ---------- 臥蠶 ---------- */
+const AEGYO_STYLES = [['natural', '自然'], ['bold', '明顯'], ['glitter', '亮片'], ['pink', '粉嫩']];
+function applyAegyo(out, E, color, amt, style) {
+  const W = out.width, H = out.height, ew = E.ew, Lw = E.lower, R = regionOf([...E.poly, ...Lw.map(p => ({ x: p.x - E.up.x * ew * .3, y: p.y - E.up.y * ew * .3 }))], ew * .15, W, H); if (!R) return;
+  R.sp = Math.max(1, E.fw / 380); const h1 = style === 'bold' ? .085 : .07, prof = s => Math.sin(Math.PI * clamp((s - .08) / .88, 0, 1));
+  const lift = drawAlpha(R, x => { x.globalCompositeOperation = 'lighten'; Lw.forEach(p => { const v = Math.round(255 * prof(p.s)); x.fillStyle = `rgb(${v},${v},${v})`; x.beginPath(); x.ellipse(p.x - E.up.x * ew * h1 * .55, p.y - E.up.y * ew * h1 * .55, ew * .05, ew * h1 * .5, Math.atan2(E.ax.y, E.ax.x), 0, 7); x.fill(); }); }, ew * .025);
+  const shade = drawAlpha(R, x => { x.strokeStyle = '#fff'; x.lineCap = 'round'; for (let k = 1; k < Lw.length; k++) { const s = Lw[k].s, v = prof(s); if (v < .05) continue; x.globalAlpha = v; x.lineWidth = ew * .02; const o = ew * (h1 + .03); x.beginPath(); x.moveTo(Lw[k - 1].x - E.up.x * o, Lw[k - 1].y - E.up.y * o); x.lineTo(Lw[k].x - E.up.x * o, Lw[k].y - E.up.y * o); x.stroke(); } }, ew * .02);
+  const hole = eyeHole(E, R, ew * .01); for (let i = 0; i < lift.length; i++) { lift[i] *= 1 - hole[i]; shade[i] *= 1 - hole[i]; }
+  paintRegion(out, R, lift, style === 'pink' ? '#ffd6e2' : color, amt * (style === 'bold' ? 1 : .75), 'aegyo', style === 'glitter' ? 'glitter' : '');
+  paintRegion(out, R, shade, '#8a6a5c', amt * (style === 'bold' ? .3 : .18), 'shadow', 'matte');
+}
+/* ---------- 口紅：顏色換成唇色、保留唇紋，再依質地調光澤 ---------- */
+const LIP_TEX = [['matte', '霧面'], ['velvet', '絲絨'], ['satin', '滋潤'], ['gloss', '水光'], ['glass', '鏡面'], ['bitten', '咬唇'], ['shimmer', '珠光']];
+function applyLip(out, f, color, amt, tex) {
+  const W = out.width, H = out.height, fw = fInfo(f, W, H).w, outer = pts(f, LIPS_OUT, W, H), inner = pts(f, LIPS_IN, W, H), R = regionOf(outer, fw * .04, W, H); if (!R) return;
+  const M = drawAlpha(R, x => { x.fillStyle = '#fff'; x.beginPath(); pathPts(x, outer); x.fill(); x.fillStyle = '#000'; x.beginPath(); pathPts(x, inner); x.fill(); }, Math.max(.8, fw * .006));
+  const inn = drawAlpha(R, x => { x.fillStyle = '#fff'; x.strokeStyle = '#fff'; x.lineJoin = 'round'; x.lineWidth = fw * .05; x.beginPath(); pathPts(x, inner); x.fill(); x.stroke(); }, fw * .035);
+  const lo = P(f, 14, W, H), lb = P(f, 17, W, H), gl = drawAlpha(R, x => { x.fillStyle = '#fff'; x.beginPath(); x.ellipse(lo.x * .45 + lb.x * .55, lo.y * .45 + lb.y * .55, fw * .055, fw * .016, 0, 0, 7); x.fill(); }, fw * .015);
+  const ctx = c2d(out), id = ctx.getImageData(R.rx, R.ry, R.rw, R.rh), d = id.data, n = R.rw * R.rh, [cr, cg, cb] = hex3(color), cl = .3 * cr + .59 * cg + .11 * cb, sp = Math.max(1, fw / 380);
+  let sl = 0, sw = 0; for (let i = 0; i < n; i++) if (M[i] > .5) { sl += lumOf(d, i * 4); sw++; } const mL = sw ? sl / sw : .5;
+  const flat = { matte: .45, velvet: .35, satin: .85, gloss: .9, glass: 1, bitten: .8, shimmer: .8 }[tex] ?? .8;
+  for (let y = 0, i = 0; y < R.rh; y++) for (let x = 0; x < R.rw; x++, i++) {
+    let m = M[i]; if (m < .005) continue; if (tex === 'bitten') m *= .15 + .85 * clamp(inn[i] * 1.6, 0, 1);
+    const o = i * 4, r = d[o] / 255, g = d[o + 1] / 255, b = d[o + 2] / 255, L = .3 * r + .59 * g + .11 * b, rel = 1 + (L / Math.max(.05, mL) - 1) * flat;
+    m *= 1 - smoothstep(Math.max(.55, mL * 1.25), Math.max(.7, mL * 1.5), L) * (1 - smoothstep(.08, .2, Math.max(r, g, b) - Math.min(r, g, b))); if (m < .005) continue; // 牙齒不上色
+    let R2 = clamp(cr * rel, 0, 1), G2 = clamp(cg * rel, 0, 1), B2 = clamp(cb * rel, 0, 1);
+    if (tex === 'velvet') { const e = 1 - smoothstep(.3, .9, M[i]); R2 *= 1 - .18 * e; G2 *= 1 - .2 * e; B2 *= 1 - .18 * e; }
+    if (tex === 'gloss' || tex === 'glass' || tex === 'satin') { const s = (tex === 'satin' ? .12 : tex === 'gloss' ? .4 : .6) * smoothstep(mL * 1.05, mL * 1.45, L) + (tex === 'satin' ? 0 : tex === 'gloss' ? .3 : .5) * gl[i]; R2 += s * (1 - R2); G2 += s * (1 - G2); B2 += s * (1 - B2); }
+    if (tex === 'shimmer') { const h = hash2(Math.floor((R.rx + x) / sp), Math.floor((R.ry + y) / sp)), s = h > .9 ? (h - .9) * 7 : 0; R2 += s * (1 - R2); G2 += s * (1 - G2) * .9; B2 += s * (1 - B2) * .85; }
+    if (tex === 'matte') { const k = smoothstep(mL * 1.1, mL * 1.6, L) * .5; R2 -= (R2 - cr * .95) * k; G2 -= (G2 - cg * .95) * k; B2 -= (B2 - cb * .95) * k; }
+    const k = m * amt * .92; d[o] = (r + (R2 - r) * k) * 255; d[o + 1] = (g + (G2 - g) * k) * 255; d[o + 2] = (b + (B2 - b) * k) * 255;
+  }
+  ctx.putImageData(id, R.rx, R.ry);
+}
+/* ---------- 整妝 ---------- */
+const LOOKS = [
+  ['bare', '素顏感', { lip: ['#d9867a', .35, 'satin'], blush: ['#f4a3a8', .28, 'apple', 'satin'], brow: ['auto', .5, 'natural'], lash: ['#2b1d17', .4, 'natural'], aegyo: ['#fff1e6', .4, 'natural'] }],
+  ['daily', '日常通勤', { lip: ['#c96a6a', .55, 'satin'], blush: ['#f6b3a0', .35, 'apple', 'satin'], brow: ['auto', .6, 'standard'], shadow: ['#b98a6e', .45, 'grad', 'matte'], liner: ['#2e2019', .5, 'natural'], lash: ['#141010', .55, 'natural'], aegyo: ['#fff1e6', .4, 'natural'], contour: ['#8a6a5c', .3, 'natural'] }],
+  ['korean', '韓系清透', { lip: ['#ef6a4f', .5, 'gloss'], blush: ['#ff8fa3', .3, 'high', 'gloss'], brow: ['auto', .65, 'straight'], shadow: ['#d98c84', .4, 'wash', 'satin'], liner: ['#4a3125', .45, 'inner'], lash: ['#2b1d17', .5, 'curl'], aegyo: ['#fff1e6', .55, 'glitter'], hl: ['#fff4e6', .4, 'glow', 'gloss'] }],
+  ['genki', '元氣少女', { lip: ['#ff6f91', .55, 'gloss'], blush: ['#ff8fa3', .5, 'sun', 'satin'], brow: ['auto', .55, 'natural'], shadow: ['#e7a07a', .4, 'peach', 'shimmer'], liner: ['#4a3125', .45, 'puppy'], lash: ['#2b1d17', .6, 'doll'], aegyo: ['#ffe4ec', .6, 'pink'] }],
+  ['peach', '桃花妝', { lip: ['#e86a8a', .6, 'bitten'], blush: ['#f4a3a8', .5, 'tipsy', 'satin'], brow: ['auto', .55, 'willow'], shadow: ['#e5989b', .55, 'peach', 'satin'], liner: ['#4a3125', .45, 'puppy'], lash: ['#2b1d17', .55, 'fairy'], aegyo: ['#ffe4ec', .5, 'pink'] }],
+  ['pure', '純欲', { lip: ['#d65a76', .6, 'glass'], blush: ['#e8a0a8', .4, 'high', 'gloss'], brow: ['auto', .6, 'straight'], shadow: ['#c69a7a', .45, 'grad', 'satin'], liner: ['#2e2019', .5, 'puppy'], lash: ['#141010', .6, 'fairy'], aegyo: ['#fff1e6', .55, 'glitter'], hl: ['#fff4e6', .45, 'glow', 'gloss'] }],
+  ['euro', '歐美濃妝', { lip: ['#9e5a4c', .7, 'matte'], blush: ['#d98b8b', .35, 'diag', 'matte'], brow: ['auto', .75, 'euro'], shadow: ['#8b5e4b', .65, 'outer', 'matte'], liner: ['#1a1414', .75, 'cat'], lash: ['#141010', .75, 'dense'], contour: ['#6f5246', .55, 'sculpt'], hl: ['#ffe2b0', .5, 'cheek', 'shimmer'] }],
+  ['retro', '復古紅唇', { lip: ['#b3263c', .75, 'velvet'], blush: ['#d98b8b', .3, 'diag', 'matte'], brow: ['auto', .65, 'arch'], shadow: ['#a07a62', .4, 'wash', 'matte'], liner: ['#1a1414', .7, 'cat'], lash: ['#141010', .65, 'separate'], contour: ['#6f5246', .35, 'natural'] }],
+  ['smoky', '小煙燻', { lip: ['#b8675c', .5, 'satin'], blush: ['#c79ad6', .2, 'diag', 'matte'], brow: ['auto', .65, 'standard'], shadow: ['#5a4e4a', .6, 'smoky', 'matte'], liner: ['#1a1414', .7, 'smoky'], lash: ['#141010', .7, 'dense'], contour: ['#6f5246', .4, 'sculpt'] }],
+  ['cool', '冷感', { lip: ['#a64453', .55, 'matte'], blush: ['#e8a0a8', .2, 'high', 'matte'], brow: ['auto', .7, 'sword'], shadow: ['#8e7dbe', .35, 'outer', 'satin'], liner: ['#1a1414', .65, 'flat'], lash: ['#141010', .55, 'separate'], lens: ['#8b8f96', .45, 'natural'], contour: ['#5b4a45', .45, 'natural'] }],
+];
+const MK_KEYS = ['lip', 'blush', 'contour', 'hl', 'brow', 'shadow', 'liner', 'lash', 'lens', 'aegyo'];
+function applyLook(MK, id, k) {
+  const L = LOOKS.find(l => l[0] === id); MK.look = id; MK.lookK = k; if (!L) return;
+  MK_KEYS.forEach(key => MK[key].a = 0);
+  Object.entries(L[2]).forEach(([key, v]) => { const it = MK[key]; it.c = v[0]; it.a = v[1] * k; if (v[2]) it[key === 'blush' ? 'pos' : key === 'hl' ? 'style' : key === 'lip' ? 'tex' : 'style'] = v[2]; if (v[3]) it.tex = v[3]; });
 }
 function applyMakeup(src, faces, MK) {
   const out = cloneCanvas(src), W = out.width, H = out.height;
-  faces.forEach(f => {
-    const g = fInfo(f, W, H), fw = g.w, F = faceFrame(f, W, H);
+  faces.forEach((f, fi) => {
+    const F = faceFrame(f, W, H);
+    if (MK.brow.a > 0) applyBrow(out, f, MK.brow.c, MK.brow.a, MK.brow.style);
     if (MK.contour.a > 0) paintMask(out, buildFaceMask(f, W, H, contourElems(F, MK.contour.style)), MK.contour.c, MK.contour.a, 'contour');
     if (MK.blush.a > 0) paintMask(out, buildFaceMask(f, W, H, blushElems(F, MK.blush.pos)), MK.blush.c, MK.blush.a, 'blush', MK.blush.tex);
     if (MK.hl.a > 0) paintMask(out, buildFaceMask(f, W, H, hlElems(F, MK.hl.style), { soft: 1.8 }), MK.hl.c, MK.hl.a, 'hl', MK.hl.tex);
-    if (MK.lip.a > 0) { const m = polyMask(W, H, [pts(f, LIPS_OUT, W, H)], { cut: [pts(f, LIPS_IN, W, H)], feather: Math.max(1, fw * .007) }); const L = layerOf(m, MK.lip.c); blendOn(out, L, 'color', MK.lip.a * .8); blendOn(out, L, 'multiply', MK.lip.a * .35); blendOn(out, L, 'soft-light', MK.lip.a * .35); }
-    if (MK.brow.a > 0) applyBrow(out, f, MK.brow.c, MK.brow.a, MK.brow.style);
-    if (MK.shadow.a > 0) {
-      const polys = [[UPPER_R, 33, 133], [UPPER_L, 263, 362]].map(([idx, a, b]) => { const lid = pts(f, idx, W, H), ew = dist(P(f, a, W, H), P(f, b, W, H)); const up = lid.map((p, k) => ({ x: p.x, y: p.y - ew * .42 * Math.sin(Math.PI * k / (lid.length - 1)) - ew * .05 })); return [...lid, ...up.reverse()]; });
-      const m = polyMask(W, H, polys, { cut: [pts(f, EYE_R, W, H), pts(f, EYE_L, W, H)], feather: Math.max(1, fw * .018) });
-      const L = layerOf(m, MK.shadow.c); blendOn(out, L, 'multiply', MK.shadow.a * .5); blendOn(out, L, 'soft-light', MK.shadow.a * .4);
-    }
+    [0, 1].forEach(side => {
+      const E = eyeFrame(f, W, H, side);
+      if (MK.shadow.a > 0) applyShadow(out, E, MK.shadow.c, MK.shadow.a, MK.shadow.style, MK.shadow.tex);
+      if (MK.aegyo.a > 0) applyAegyo(out, E, MK.aegyo.c, MK.aegyo.a, MK.aegyo.style);
+      if (MK.liner.a > 0) applyLiner(out, E, MK.liner.c, MK.liner.a, MK.liner.style);
+      if (MK.lash.a > 0) applyLash(out, E, MK.lash.c, MK.lash.a, MK.lash.style, 97 + side * 31 + fi * 7);
+      if (MK.lens.a > 0) applyLens(out, E, MK.lens.c, MK.lens.a, MK.lens.style);
+    });
+    if (MK.lip.a > 0) applyLip(out, f, MK.lip.c, MK.lip.a, MK.lip.tex);
   });
   return out;
 }
@@ -1529,6 +1817,9 @@ const ICO = {
   slim: '<path d="M12 3c4.5 0 7 3.5 7 8 0 5-3.5 10-7 10s-7-5-7-10c0-4.5 2.5-8 7-8"/><path d="m3 13 3 0M21 13h-3"/>', big: '<path d="M2 12c3-5 7-7 10-7s7 2 10 7c-3 5-7 7-10 7s-7-2-10-7"/><circle cx="12" cy="12" r="4.5"/>',
   nose: '<path d="M12 4v9l-3 4c1.5 1 4.5 1 6 0"/>', lip: '<path d="M3 12c3-4 6-5 9-3 3-2 6-1 9 3-3 5-6 7-9 7s-6-2-9-7"/><path d="M3 12h18"/>',
   blush: '<circle cx="7" cy="14" r="3.5"/><circle cx="17" cy="14" r="3.5"/><path d="M8 7h0M16 7h0"/>', contour: '<path d="M7 4c-2 4-2 10 1 14 2 2 6 2 8 0 3-4 3-10 1-14"/><path d="M7.5 13c1 2 2 3 3 3.5M16.5 13c-1 2-2 3-3 3.5"/>', hl: '<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/>', makeup: '<path d="M9 21h6M10 21V11h4v10M10 11l1-7h2l1 7"/>',
+  eshadow: '<path d="M2 13c3-4 7-6 10-6s7 2 10 6"/><path d="M5 10.5c2-2.5 4.5-3.5 7-3.5s5 1 7 3.5c-2-1-4.5-1.5-7-1.5s-5 .5-7 1.5z" fill="currentColor" opacity=".35"/><path d="M3 14c3 3 6 4 9 4s6-1 9-4"/>', liner: '<path d="M2 13c3-3 6-4.5 10-4.5S19 10 22 13"/><path d="M4 11.5c3-2.5 5.5-3.5 8-3.5 4 0 7 1.5 10 5" stroke-width="2.6"/><path d="M22 13l1.5-2.5"/>',
+  lash: '<path d="M3 15c3-3 6-4 9-4s6 1 9 4"/><path d="M6 12.5 5 9.5M9 11.3 8.5 8M12 11V7.5M15 11.3l.5-3.3M18 12.5l1-3"/>', lens: '<path d="M2 12c3-5 7-7 10-7s7 2 10 7c-3 5-7 7-10 7s-7-2-10-7"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/>',
+  aegyo: '<path d="M3 10c3-3 6-4 9-4s6 1 9 4c-3 2.5-6 3.5-9 3.5S6 12.5 3 10z"/><path d="M5 14c2.5 2.5 4.5 3.3 7 3.3s4.5-.8 7-3.3"/>', brow: '<path d="M3 13c3-4 7-5.5 10-5.5 3.5 0 6 1.5 8 4"/><path d="M4 14c3-3 6-4.2 9-4.2 3 0 5.5 1 7.5 3"/>',
   body: '<circle cx="12" cy="4.5" r="2"/><path d="M8 22l1-8-2-5h10l-2 5 1 8"/>', waist: '<path d="M7 3c0 6 3 7 3 9s-3 3-3 9M17 3c0 6-3 7-3 9s3 3 3 9"/>', tall: '<circle cx="12" cy="4.5" r="2"/><path d="M12 8v14M8 18l4 4 4-4"/>',
   collage: '<rect x="3" y="3" width="8" height="18" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/>', poster: '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 7h8M8 11h5"/><rect x="8" y="14" width="8" height="5" rx="1"/>',
   idphoto: '<rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M7.5 18c.8-2.2 2.5-3.2 4.5-3.2s3.7 1 4.5 3.2"/>',
@@ -1539,7 +1830,7 @@ const ICO = {
 const ic = (k, sw = 1.7) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${ICO[k] || ICO.adjust}</svg>`;
 const TABS = {
   edit: [['crop', '裁剪', 'crop'], ['adjust', '調整', 'adjust'], ['filter', '濾鏡', 'filter'], ['fx', '特效', 'fx'], ['recipe', '配方', 'recipe'], ['hsl', 'HSL', 'hsl'], ['curve', '曲線', 'curve'], ['text', '文字', 'text'], ['sticker', '貼紙', 'sticker'], ['frame', '邊框', 'frame'], ['mosaic', '馬賽克', 'mosaic'], ['doodle', '塗鴉', 'doodle'], ['erase', 'AI 消除', 'erase'], ['matte', '摳圖', 'matte'], ['upscale', '變清晰', 'upscale']],
-  beauty: [['auto', '一鍵美顏', 'auto'], ['smooth', '磨皮', 'smooth'], ['whiten', '美白', 'whiten'], ['acne', '祛痘', 'acne'], ['dark', '黑眼圈', 'dark'], ['eyes2', '亮眼', 'eyes2'], ['teeth', '白牙', 'teeth'], ['shape:slim', '瘦臉', 'slim'], ['shape:eyes', '大眼', 'big'], ['shape:nose', '瘦鼻', 'nose'], ['shape', '臉型', 'shape'], ['makeup:lip', '口紅', 'lip'], ['makeup:blush', '腮紅', 'blush'], ['makeup:contour', '修容', 'contour'], ['makeup:hl', '提亮', 'hl'], ['makeup', '美妝', 'makeup'], ['body:slim', '瘦身', 'body'], ['body:waist', '瘦腰', 'waist'], ['body:tall', '增高', 'tall'], ['filter', '濾鏡', 'filter']],
+  beauty: [['auto', '一鍵美顏', 'auto'], ['smooth', '磨皮', 'smooth'], ['whiten', '美白', 'whiten'], ['acne', '祛痘', 'acne'], ['dark', '黑眼圈', 'dark'], ['eyes2', '亮眼', 'eyes2'], ['teeth', '白牙', 'teeth'], ['shape:slim', '瘦臉', 'slim'], ['shape:eyes', '大眼', 'big'], ['shape:nose', '瘦鼻', 'nose'], ['shape', '臉型', 'shape'], ['makeup:look', '妝容', 'makeup'], ['makeup:lip', '口紅', 'lip'], ['makeup:shadow', '眼影', 'eshadow'], ['makeup:liner', '眼線', 'liner'], ['makeup:lash', '睫毛', 'lash'], ['makeup:lens', '美瞳', 'lens'], ['makeup:aegyo', '臥蠶', 'aegyo'], ['makeup:brow', '眉毛', 'brow'], ['makeup:blush', '腮紅', 'blush'], ['makeup:contour', '修容', 'contour'], ['makeup:hl', '提亮', 'hl'], ['body:slim', '瘦身', 'body'], ['body:waist', '瘦腰', 'waist'], ['body:tall', '增高', 'tall'], ['filter', '濾鏡', 'filter']],
 };
 function renderTabs() {
   $$('.seg2 button').forEach(b => b.classList.toggle('on', b.dataset.grp === S.grp));
@@ -2518,38 +2809,63 @@ TOOLS.shape = {
 
 /* 美妝 */
 const MK_PAL = {
-  lip: ['#c2185b', '#e53950', '#d4505e', '#ff6f91', '#b7414f', '#a0302f', '#8e244d', '#e98074'],
-  blush: ['#ff8fa3', '#ff7f6e', '#f4a3a8', '#e8a0a8', '#f6b3a0', '#d98b8b', '#ff6f91', '#c79ad6'],
-  brow: ['#3b2a22', '#5a3d2b', '#6d4c41', '#2b2b2b', '#8d6e63'],
-  shadow: ['#b5838d', '#c97b63', '#8e7dbe', '#a1887f', '#e5989b', '#6d597a'],
+  lip: ['#b3263c', '#d6303f', '#e2483d', '#ef6a4f', '#f08a7b', '#e86a8a', '#ff8fa8', '#d65a76', '#c04d5c', '#a64453', '#8c2f3c', '#6e1f2e', '#b8675c', '#c98473', '#9e5a4c', '#c96a6a'],
+  blush: ['#ff8fa3', '#ff7f6e', '#f4a3a8', '#e8a0a8', '#f6b3a0', '#d98b8b', '#ff6f91', '#c79ad6', '#f7a072', '#e9967a'],
+  brow: ['#2e211b', '#3b2a22', '#5a3d2b', '#6d4c41', '#8d6e63', '#2b2b2b', '#5b5048'],
+  shadow: ['#a07a62', '#b98a6e', '#c69a7a', '#8b5e4b', '#b5838d', '#d98c84', '#e7a07a', '#c27a5a', '#e5989b', '#8e7dbe', '#7a2e3a', '#5a4e4a'],
+  liner: ['#1a1414', '#2e2019', '#4a3125', '#5a2a2e', '#1f2a44', '#555555'],
+  lash: ['#141010', '#2b1d17', '#3d2a20'],
+  lens: ['#7a5236', '#a8743f', '#5a3a28', '#c99a5b', '#8b8f96', '#6f9bc2', '#5c8f6e', '#8a7aa6', '#a2786a', '#3a3030'],
+  aegyo: ['#fff1e6', '#fff8f0', '#ffe4ec', '#ffe2b0'],
   contour: ['#6f5246', '#8a6a5c', '#5b4a45', '#9c7a63'],
   hl: ['#fff4e6', '#ffffff', '#ffe4ec', '#ffe2b0', '#efe6ff'],
 };
-const MK_NAMES = [['lip', '口紅'], ['blush', '腮紅'], ['contour', '修容'], ['hl', '提亮'], ['brow', '眉毛'], ['shadow', '眼影']];
-const MK = { k: 'lip', lip: { c: '#e53950', a: 0 }, blush: { c: '#ff8fa3', a: 0, pos: 'apple', tex: 'satin' }, brow: { c: '#5a3d2b', a: 0, style: 'natural' }, shadow: { c: '#b5838d', a: 0 }, contour: { c: '#6f5246', a: 0, style: 'natural' }, hl: { c: '#fff4e6', a: 0, style: 't', tex: 'soft' } };
+const MK_NAMES = [['look', '妝容'], ['lip', '口紅'], ['shadow', '眼影'], ['liner', '眼線'], ['lash', '睫毛'], ['lens', '美瞳'], ['aegyo', '臥蠶'], ['brow', '眉毛'], ['blush', '腮紅'], ['contour', '修容'], ['hl', '提亮']];
+const MK = {
+  k: 'look', look: 'daily', lookK: .8,
+  lip: { c: '#c96a6a', a: 0, tex: 'satin' }, blush: { c: '#ff8fa3', a: 0, pos: 'apple', tex: 'satin' }, brow: { c: 'auto', a: 0, style: 'natural' },
+  shadow: { c: '#b98a6e', a: 0, style: 'grad', tex: 'matte' }, liner: { c: '#2e2019', a: 0, style: 'natural' }, lash: { c: '#141010', a: 0, style: 'natural' },
+  lens: { c: '#7a5236', a: 0, style: 'natural' }, aegyo: { c: '#fff1e6', a: 0, style: 'natural' },
+  contour: { c: '#6f5246', a: 0, style: 'natural' }, hl: { c: '#fff4e6', a: 0, style: 't', tex: 'soft' },
+};
 const mkRow = (label, html) => `<p class="mkl">${label}</p>${html}`;
 TOOLS.makeup = {
   name: '美妝', heavy: true,
-  async init(param) { MK_NAMES.forEach(([k]) => MK[k].a = 0); MK.k = param || 'lip'; MK[MK.k].a = .6; const f = await needFaces(); if (f === false) return false; MK.faces = f; refreshUI(); this.pv(); },
+  async init(param) {
+    MK_KEYS.forEach(k => MK[k].a = 0); MK.k = param || 'look'; MK.look = null;
+    if (MK.k === 'look') applyLook(MK, 'daily', .8); else MK[MK.k].a = .6;
+    const f = await needFaces(); if (f === false) return false; MK.faces = f; refreshUI(); this.pv();
+  },
   ui() {
-    const it = MK[MK.k]; let h = chips(MK_NAMES.map(([k, l]) => [k, l + (MK[k].a ? '•' : '')]), MK.k, 'mkk');
-    if (MK.k === 'blush') h += mkRow('位置', chips(BLUSH_POS, it.pos, 'mkp')) + mkRow('質地', chips(BLUSH_TEX, it.tex, 'mkt'));
-    if (MK.k === 'contour') h += mkRow('樣式', chips(CONTOUR_STYLES, it.style, 'mks'));
-    if (MK.k === 'brow') h += mkRow('眉型', chips(BROW_STYLES, it.style, 'mks'));
-    if (MK.k === 'hl') h += mkRow('位置', chips(HL_STYLES, it.style, 'mks')) + mkRow('質地', chips(HL_TEX, it.tex, 'mkt'));
-    return h + mkRow('顏色', swatches(MK_PAL[MK.k], it.c, 'mkc')) + sl('mkA', '濃淡', 0, 100, Math.round(it.a * 100));
+    const k = MK.k; let h = chips(MK_NAMES.map(([v, l]) => [v, l + (v !== 'look' && MK[v].a ? '•' : '')]), k, 'mkk');
+    if (k === 'look') return h + mkRow('一鍵妝容', chips(LOOKS.map(l => [l[0], l[1]]), MK.look, 'mlk')) + sl('mkL', '整體濃淡', 0, 100, Math.round(MK.lookK * 100)) + `<p class="note">選好妝容後，可以再點上面的口紅、眼影等分別微調。</p>`;
+    const it = MK[k];
+    if (k === 'lip') h += mkRow('質地', chips(LIP_TEX, it.tex, 'mkt'));
+    if (k === 'blush') h += mkRow('位置', chips(BLUSH_POS, it.pos, 'mkp')) + mkRow('質地', chips(BLUSH_TEX, it.tex, 'mkt'));
+    if (k === 'shadow') h += mkRow('畫法', chips(SHADOW_STYLES, it.style, 'mks')) + mkRow('質地', chips(SHADOW_TEX, it.tex, 'mkt'));
+    if (k === 'liner') h += mkRow('款式', chips(LINER_STYLES, it.style, 'mks'));
+    if (k === 'lash') h += mkRow('款式', chips(LASH_STYLES, it.style, 'mks'));
+    if (k === 'lens') h += mkRow('款式', chips(LENS_STYLES, it.style, 'mks'));
+    if (k === 'aegyo') h += mkRow('款式', chips(AEGYO_STYLES, it.style, 'mks'));
+    if (k === 'brow') h += mkRow('眉型', chips(BROW_STYLES, it.style, 'mks'));
+    if (k === 'contour') h += mkRow('樣式', chips(CONTOUR_STYLES, it.style, 'mks'));
+    if (k === 'hl') h += mkRow('位置', chips(HL_STYLES, it.style, 'mks')) + mkRow('質地', chips(HL_TEX, it.tex, 'mkt'));
+    const extra = k === 'brow' ? `<button class="chip ${it.c === 'auto' ? 'on' : ''}" data-mkc="auto">原本髮色</button>` : '';
+    return h + mkRow('顏色', swatches(MK_PAL[k], it.c, 'mkc', extra)) + sl('mkA', '濃淡', 0, 100, Math.round(it.a * 100)) + (k === 'lens' && MK.faces && MK.faces.some(f => f.length < 478) ? '<p class="note">這張照片找不到瞳孔位置，美瞳可能沒有效果。</p>' : '');
   },
   bind(r) {
     const touch = () => { if (!MK[MK.k].a) MK[MK.k].a = .6; refreshUI(); this.pv(); };
     on(r, '[data-mkk]', b => { MK.k = b.dataset.mkk; $('#tName').textContent = MK_NAMES.find(x => x[0] === MK.k)[1]; refreshUI(); });
+    on(r, '[data-mlk]', b => { applyLook(MK, b.dataset.mlk, MK.lookK); refreshUI(); this.pv(); });
     on(r, '[data-mkc]', b => { MK[MK.k].c = b.dataset.mkc; touch(); });
     on(r, '[data-mkp]', b => { MK[MK.k].pos = b.dataset.mkp; touch(); });
     on(r, '[data-mkt]', b => { MK[MK.k].tex = b.dataset.mkt; touch(); });
     on(r, '[data-mks]', b => { MK[MK.k].style = b.dataset.mks; touch(); });
-    $('#mkA', r).addEventListener('input', e => { MK[MK.k].a = +e.target.value / 100; this.pv(); });
+    $('#mkA', r)?.addEventListener('input', e => { MK[MK.k].a = +e.target.value / 100; this.pv(); });
+    $('#mkL', r)?.addEventListener('input', e => { MK.lookK = +e.target.value / 100; if (MK.look) applyLook(MK, MK.look, MK.lookK); this.pv(); });
   },
   pv() { schedulePreview(() => asPreview(applyMakeup(proxy(), MK.faces, MK), pk())); },
-  async apply(task) { if (!MK_NAMES.some(([k]) => MK[k].a)) return null; task.status('處理原尺寸照片…'); await sleep(30); return applyMakeup(S.img, MK.faces, MK); },
+  async apply(task) { if (!MK_KEYS.some(k => MK[k].a)) return null; task.status('處理原尺寸照片…'); await sleep(30); return applyMakeup(S.img, MK.faces, MK); },
 };
 
 /* 身材 */
