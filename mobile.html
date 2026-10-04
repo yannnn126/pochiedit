@@ -279,7 +279,8 @@ async function runTask(title, fn) {
 function friendlyError(e) {
   const m = String(e?.message || e);
   if (/Failed to fetch|NetworkError|Load failed|network/i.test(m)) return '下載失敗：請確認網路連線後再試一次';
-  if (/memory|OOM|allocation|Failed to allocate/i.test(m)) return '手機記憶體不足：請換小一點的照片或選較小的倍率';
+  if (/memory|OOM|allocation|Failed to allocate|bad_alloc/i.test(m)) return '手機記憶體不足：請換小一點的照片，或分幾次塗小範圍';
+  if (/no available backend|wasm|WebAssembly|ort-wasm/i.test(m)) return 'AI 執行環境載入失敗：請重新整理頁面再試一次';
   return '處理失敗：' + m.slice(0, 120);
 }
 
@@ -498,7 +499,7 @@ function loadOrt() {
   if (ortP) return ortP;
   ortP = new Promise((res, rej) => {
     const sc = document.createElement('script'); sc.src = ORT_BASE + 'ort.webgpu.min.js'; sc.async = true; sc.crossOrigin = 'anonymous';
-    sc.onload = () => { const o = window.ort; if (!o) { ortP = null; return rej(new Error('AI 執行環境沒有載入，請確認網路連線')); } o.env.wasm.wasmPaths = ORT_BASE; o.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 2); o.env.logLevel = 'error'; res(o); };
+    sc.onload = () => { const o = window.ort; if (!o) { ortP = null; return rej(new Error('AI 執行環境沒有載入，請確認網路連線')); } o.env.wasm.wasmPaths = ORT_BASE; o.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 2) : 1; o.env.logLevel = 'error'; res(o); };
     sc.onerror = () => { sc.remove(); ortP = null; rej(new Error('AI 執行環境下載失敗，請確認網路連線')); };
     document.head.appendChild(sc);
   });
@@ -526,15 +527,31 @@ async function fetchModel(key, task) {
   if (cache) try { await cache.put(m.url, new Response(buf, { headers: { 'content-type': 'application/octet-stream' } })); } catch (e) { console.warn('快取失敗', e); }
   return buf;
 }
+// MI-GAN 的模型裡含 uint8 前後處理，在不少手機顯示卡（WebGPU）上會「建立成功、執行失敗」，固定用處理器跑最穩
+const WASM_ONLY = { migan: true };
+const createSess = (buf, gpu) => ort.InferenceSession.create(buf, { executionProviders: gpu ? ['webgpu', 'wasm'] : ['wasm'], graphOptimizationLevel: 'all' });
 async function getSession(key, task) {
   if (sessions[key]) return sessions[key];
   if (!window.ort) { task?.status('載入 AI 執行環境…'); await loadOrt(); task?.check(); }
   const buf = await fetchModel(key, task);
-  task?.check(); task?.status(`把模型載入${hasWebGPU ? '顯示卡' : '記憶體'}：${MODELS[key].name}`);
+  let gpu = hasWebGPU && !WASM_ONLY[key];
+  task?.check(); task?.status(`把模型載入${gpu ? '顯示卡' : '記憶體'}：${MODELS[key].name}`);
   let sess;
-  try { sess = await ort.InferenceSession.create(buf, { executionProviders: hasWebGPU ? ['webgpu', 'wasm'] : ['wasm'], graphOptimizationLevel: 'all' }); }
-  catch (e) { console.warn('WebGPU 建立失敗，改用 WASM', e); sess = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'] }); backendLabel = 'WASM（處理器）'; }
-  sessions[key] = sess; return sess;
+  try { sess = await createSess(buf, gpu); }
+  catch (e) { if (!gpu) throw e; console.warn('WebGPU 建立失敗，改用 WASM', e); sess = await createSess(buf, false); gpu = false; backendLabel = 'WASM（處理器）'; }
+  sess._key = key; sess._gpu = gpu; sessions[key] = sess; return sess;
+}
+// 執行模型：顯示卡執行失敗時，自動改用處理器重新建立一次再跑（模型從瀏覽器快取讀，不會重新下載）
+async function sessRun(sess, feeds) {
+  if (sess._alt) return sess._alt.run(feeds);
+  try { return await sess.run(feeds); }
+  catch (e) {
+    if (!sess._gpu || e instanceof CancelError) throw e;
+    console.warn('WebGPU 執行失敗，改用 WASM 重跑', e);
+    const alt = await createSess(await fetchModel(sess._key), false);
+    alt._key = sess._key; alt._gpu = false; alt._f16 = sess._f16; sess._alt = alt; sessions[sess._key] = alt; backendLabel = 'WASM（處理器）';
+    return alt.run(feeds);
+  }
 }
 /* float16 互轉（部分 fp16 模型需要） */
 const _f32 = new Float32Array(1), _u32 = new Uint32Array(_f32.buffer);
@@ -561,10 +578,10 @@ async function runImage(sess, data, dims, outIndex = 0) {
   };
   let res;
   if (sess._f16 === undefined) {
-    try { res = await sess.run({ [name]: mk(false) }); sess._f16 = false; }
-    catch (e) { if (/float16|type|Unexpected input data type/i.test(String(e.message))) { res = await sess.run({ [name]: mk(true) }); sess._f16 = true; } else throw e; }
-  } else res = await sess.run({ [name]: mk(sess._f16) });
-  const t = res[sess.outputNames[outIndex]];
+    try { res = await sessRun(sess, { [name]: mk(false) }); sess._f16 = false; }
+    catch (e) { if (/float16|type|Unexpected input data type/i.test(String(e.message))) { res = await sessRun(sess, { [name]: mk(true) }); sess._f16 = true; } else throw e; }
+  } else res = await sessRun(sess, { [name]: mk(sess._f16) });
+  const t = res[(sess._alt || sess).outputNames[outIndex]];
   return { data: tensorToF32(t), dims: t.dims };
 }
 
@@ -631,13 +648,27 @@ async function inpaintWith(src, P, task, { smooth = 0 } = {}) {
   const sess = await getSession('migan', task); task?.check();
   const { cx, cy, cw, ch, mk, feather } = P, n = cw * ch;
   const sx = c2d(src), id = sx.getImageData(cx, cy, cw, ch), d = id.data;
-  const img = new Uint8Array(3 * n);
-  for (let i = 0; i < n; i++) { img[i] = d[i * 4]; img[n + i] = d[i * 4 + 1]; img[2 * n + i] = d[i * 4 + 2]; }
+  // 範圍太大時先縮小再補（MI-GAN 本身就在約 512 解析度工作），避免手機記憶體不夠而失敗
+  const k = Math.min(1, 1024 / Math.max(cw, ch)), sw = Math.max(8, Math.round(cw * k)), sh = Math.max(8, Math.round(ch * k)), sn = sw * sh;
+  const img = new Uint8Array(3 * sn); let mkS = mk;
+  if (k < 1) {
+    const cc = mkCanvas(sw, sh), cx2 = c2d(cc); cx2.imageSmoothingQuality = 'high'; cx2.drawImage(src, cx, cy, cw, ch, 0, 0, sw, sh);
+    const dd = cx2.getImageData(0, 0, sw, sh).data; for (let i = 0; i < sn; i++) { img[i] = dd[i * 4]; img[sn + i] = dd[i * 4 + 1]; img[2 * sn + i] = dd[i * 4 + 2]; }
+    const hm = mkCanvas(cw, ch), hx = c2d(hm), hid = hx.createImageData(cw, ch); for (let i = 0; i < n; i++) hid.data[i * 4 + 3] = mk[i] ? 0 : 255; hx.putImageData(hid, 0, 0);
+    const hs = mkCanvas(sw, sh), hsx = c2d(hs); hsx.drawImage(hm, 0, 0, sw, sh); const hd = hsx.getImageData(0, 0, sw, sh).data;
+    mkS = new Uint8Array(sn); for (let i = 0; i < sn; i++) mkS[i] = hd[i * 4 + 3] > 8 ? 0 : 255;
+  } else for (let i = 0; i < n; i++) { img[i] = d[i * 4]; img[n + i] = d[i * 4 + 1]; img[2 * n + i] = d[i * 4 + 2]; }
   const names = sess.inputNames, mName = names.find(s => /mask/i.test(s)) || names[1], iName = names.find(s => s !== mName);
-  const res = await sess.run({ [iName]: new ort.Tensor('uint8', img, [1, 3, ch, cw]), [mName]: new ort.Tensor('uint8', mk, [1, 1, ch, cw]) });
-  const out = res[sess.outputNames[0]].data;
+  const res = await sessRun(sess, { [iName]: new ort.Tensor('uint8', img, [1, 3, sh, sw]), [mName]: new ort.Tensor('uint8', mkS, [1, 1, sh, sw]) });
+  task?.check();
+  const t = res[(sess._alt || sess).outputNames[0]], out = t.data, od = t.dims, oh = od[2] || sh, ow = od[3] || sw;
   const fill = new Uint8ClampedArray(3 * n);
-  for (let i = 0; i < 3 * n; i++) fill[i] = out[i];
+  if (k < 1 || ow !== cw || oh !== ch) {
+    const on = ow * oh, oc = mkCanvas(ow, oh), ox = c2d(oc), oid = ox.createImageData(ow, oh);
+    for (let i = 0; i < on; i++) { oid.data[i * 4] = out[i]; oid.data[i * 4 + 1] = out[on + i]; oid.data[i * 4 + 2] = out[2 * on + i]; oid.data[i * 4 + 3] = 255; }
+    ox.putImageData(oid, 0, 0); const bc = mkCanvas(cw, ch), bx = c2d(bc); bx.imageSmoothingQuality = 'high'; bx.drawImage(oc, 0, 0, cw, ch);
+    const bd = bx.getImageData(0, 0, cw, ch).data; for (let i = 0; i < n; i++) { fill[i] = bd[i * 4]; fill[n + i] = bd[i * 4 + 1]; fill[2 * n + i] = bd[i * 4 + 2]; }
+  } else for (let i = 0; i < 3 * n; i++) fill[i] = out[i];
   if (smooth > 0 && P.prevFill) for (let i = 0; i < 3 * n; i++) fill[i] = fill[i] * (1 - smooth) + P.prevFill[i] * smooth;
   P.prevFill = fill;
   for (let i = 0; i < n; i++) {
@@ -1101,7 +1132,7 @@ function hlElems(F, st) {
   return sides(F, (I, sx) => [St([off(I('browLo1'), 0, .05), off(I('browLo2'), 0, .045)], .03, .8, .02), E(toward(off(I('eyeIn'), 0, -.005), p(168), .02), .018, .018, 0, .9, .012)]);
 }
 // 把元件畫成臉部範圍內的小尺寸遮罩（省記憶體、暈染也快），回傳與原圖的對應位置
-function buildFaceMask(f, W, H, elems, { clip = true } = {}) {
+function buildFaceMask(f, W, H, elems, { clip = true, soft = 1 } = {}) {
   const F = faceFrame(f, W, H), fw = F.fw, b = faceBox(f, W, H), pad = fw * .35;
   const rx = Math.max(0, Math.floor(b.x0 - pad)), ry = Math.max(0, Math.floor(b.y0 - pad)), rw = Math.min(W, Math.ceil(b.x1 + pad)) - rx, rh = Math.min(H, Math.ceil(b.y1 + pad)) - ry;
   if (rw < 4 || rh < 4) return null;
@@ -1113,7 +1144,7 @@ function buildFaceMask(f, W, H, elems, { clip = true } = {}) {
     if (e.t === 'E') { const q = tp(e.c); x.beginPath(); x.ellipse(q.x, q.y, e.rx * fw * k, e.ry * fw * k, e.rot, 0, 7); x.fill(); }
     else { x.lineWidth = Math.max(1, e.wd * fw * k); x.beginPath(); e.pts.map(tp).forEach((q, i) => i ? x.lineTo(q.x, q.y) : x.moveTo(q.x, q.y)); x.stroke(); }
     const d = x.getImageData(0, 0, sw, sh).data, a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = d[i * 4 + 3] / 255;
-    const bl = blurF(a, sw, sh, Math.max(1, e.b * fw * k), 3); let mx = 0; for (let i = 0; i < n; i++) if (bl[i] > mx) mx = bl[i];
+    const bl = blurF(a, sw, sh, Math.max(1, e.b * soft * fw * k), 3); let mx = 0; for (let i = 0; i < n; i++) if (bl[i] > mx) mx = bl[i];
     if (mx < 1e-3) continue; const nk = 1 / mx; // 每個元件暈開後，中心濃度一致
     for (let i = 0; i < n; i++) { const v = bl[i] * nk * e.w; acc[i] = 1 - (1 - acc[i]) * (1 - v); }
   }
@@ -1138,6 +1169,8 @@ function paintMask(out, M, color, amount, kind, tex) {
   if (!M || amount <= 0) return;
   const ctx = c2d(out), id = ctx.getImageData(M.rx, M.ry, M.rw, M.rh), d = id.data, A = resampleF(M.a, M.sw, M.sh, M.rw, M.rh);
   const [cr, cg, cb] = hex3(color), sp = Math.max(1, M.fw / 380), cl = .3 * cr + .59 * cg + .11 * cb;
+  let base = null;
+  if (kind === 'hl') { const n = M.rw * M.rh, Y = new Float32Array(n); for (let i = 0; i < n; i++) Y[i] = .2126 * _toLin[d[i * 4]] + .7152 * _toLin[d[i * 4 + 1]] + .0722 * _toLin[d[i * 4 + 2]]; base = blurF(Y, M.rw, M.rh, Math.max(1.5, M.fw / 45), 2); }
   for (let y = 0, i = 0; y < M.rh; y++) for (let x = 0; x < M.rw; x++, i++) {
     const a = A[i] * amount; if (a < .003) continue;
     const o = i * 4, r = d[o] / 255, g = d[o + 1] / 255, b = d[o + 2] / 255, L = .3 * r + .59 * g + .11 * b;
@@ -1147,11 +1180,12 @@ function paintMask(out, M, color, amount, kind, tex) {
       const k = Math.min(.6, a * .55), f = c => 1 - k * (1 - (c * .85 + cl * .15));
       R = r * f(cr); G = g * f(cg); B = b * f(cb);
     } else if (kind === 'hl') {
-      const k = Math.min(1, a), lift = c => 1 - (1 - c) * (1 - .6 * k * c);
-      R = r + (lift(r) - r) * (.6 + .4 * cr); G = g + (lift(g) - g) * (.6 + .4 * cg); B = b + (lift(b) - b) * (.6 + .4 * cb);
-      if (tex === 'soft') { R = r + (R - r) * .85; G = g + (G - g) * .85; B = b + (B - b) * .85; }
-      if (tex === 'gloss') { const s = .45 * k * smoothstep(.42, .85, L); R += s * (1 - R); G += s * (1 - G); B += s * (1 - B); }
-      if (tex === 'shimmer') { const h = hash2(Math.floor((M.rx + x) / sp), Math.floor((M.ry + y) / sp)), s = h > .88 ? (h - .88) * 8.3 * k * .9 : 0; R += s * (1 - R) * cr; G += s * (1 - G) * cg; B += s * (1 - B) * cb; }
+      // 提亮：像在那個位置多打一點光（線性光曝光、依周圍亮度柔和收尾），膚質紋理和明暗比例都保留，不會一塊白
+      const k = Math.min(1, a) * (tex === 'soft' ? .8 : 1), gn = 1 + 1.05 * k, bs = Math.max(1e-4, base[i]), ratio = gn / (1 + bs * (gn - 1));
+      R = linToS(soft1(_toLin[d[o]] * ratio)) / 255; G = linToS(soft1(_toLin[d[o + 1]] * ratio)) / 255; B = linToS(soft1(_toLin[d[o + 2]] * ratio)) / 255;
+      const tk = .16 * k; R *= 1 - tk * (1 - cr); G *= 1 - tk * (1 - cg); B *= 1 - tk * (1 - cb);   // 帶一點點提亮色
+      if (tex === 'gloss') { const s = .2 * k * smoothstep(.55, .92, (R * .3 + G * .59 + B * .11)); R += s * (1 - R); G += s * (1 - G); B += s * (1 - B); }
+      if (tex === 'shimmer') { const h = hash2(Math.floor((M.rx + x) / sp), Math.floor((M.ry + y) / sp)), s = h > .95 ? (h - .95) * 20 * k * .35 * smoothstep(.25, .6, A[i]) : 0; R += s * (1 - R) * (.7 + .3 * cr); G += s * (1 - G) * (.7 + .3 * cg); B += s * (1 - B) * (.7 + .3 * cb); }
     } else {
       // 腮紅：疊色保留皮膚紋理
       const sr = softL(r, cr), sg = softL(g, cg), sb = softL(b, cb), k = Math.min(1, a);
@@ -1170,15 +1204,69 @@ function paintMask(out, M, color, amount, kind, tex) {
   }
   ctx.putImageData(id, M.rx, M.ry);
 }
+/* ---------- 眉毛：沿著眉毛走向畫「眉頭淡、眉身實、眉尾細」，粉霧補空隙＋加深原本的眉毛，不蓋成一整塊色 ---------- */
+const BROW_STYLES = [['natural', '自然'], ['mist', '霧眉'], ['feather', '野生眉']];
+// pw 粉霧濃度、st 毛流感、hr 原眉加深、bl 暈染、th 粗細（臉部辨識的眉毛範圍偏粗，所以縮小）
+const BROW_P = { natural: { pw: .85, st: .3, hr: .7, bl: .22, th: .64 }, mist: { pw: 1, st: .08, hr: .5, bl: .34, th: .7 }, feather: { pw: .6, st: .8, hr: .85, bl: .14, th: .6 } };
+function browLine(f, W, H, idx) {
+  // idx：下緣 5 點（眉尾→眉頭）＋上緣 5 點（眉頭→眉尾）；回傳眉頭到眉尾的中線與粗細
+  const lo = idx.slice(0, 5).map(i => P(f, i, W, H)).reverse(), up = idx.slice(5).map(i => P(f, i, W, H));
+  return lo.map((a, i) => ({ x: (a.x + up[i].x) / 2, y: (a.y + up[i].y) / 2, t: dist(a, up[i]) }));
+}
+function browSamples(c, n) {
+  const out = [], m = c.length - 1;
+  for (let j = 0; j <= n; j++) {
+    const s = j / n, u = s * m, i = Math.min(m - 1, u | 0), t = u - i, p0 = c[Math.max(0, i - 1)], p1 = c[i], p2 = c[i + 1], p3 = c[Math.min(m, i + 2)];
+    const cr = (a, b, q, d) => .5 * (2 * b + (q - a) * t + (2 * a - 5 * b + 4 * q - d) * t * t + (3 * b - a - 3 * q + d) * t * t * t);
+    out.push({ x: cr(p0.x, p1.x, p2.x, p3.x), y: cr(p0.y, p1.y, p2.y, p3.y), s });
+  }
+  return out;
+}
+function applyBrow(out, f, color, amt, style) {
+  const W = out.width, H = out.height, cfg = BROW_P[style] || BROW_P.natural, fw = fInfo(f, W, H).w, sp = Math.max(1, fw / 420);
+  const [cr, cg, cb] = hex3(color), cl = Math.max(.04, .3 * cr + .59 * cg + .11 * cb), tone = [cr, cg, cb].map(v => clamp(v / cl * .5, 0, 1));
+  [BROW_R, BROW_L].forEach(idx => {
+    const line = browLine(f, W, H, idx), T0 = Math.max(1.5, line.reduce((a, p) => a + p.t, 0) / line.length * cfg.th), sm = browSamples(line, 60);
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; sm.forEach(p => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
+    const pad = T0 * 2.5 + 4, rx = Math.max(0, Math.floor(x0 - pad)), ry = Math.max(0, Math.floor(y0 - pad)), rw = Math.min(W, Math.ceil(x1 + pad)) - rx, rh = Math.min(H, Math.ceil(y1 + pad)) - ry;
+    if (rw < 4 || rh < 4) return;
+    const mc = mkCanvas(rw, rh), mx = c2d(mc); mx.fillStyle = '#000'; mx.fillRect(0, 0, rw, rh); mx.globalCompositeOperation = 'lighten';
+    for (const p of sm) {
+      const s = p.s, th = T0 * (s < .55 ? 1 - .12 * s : .93 * (1 - .72 * smoothstep(.55, 1, s)));   // 眉尾漸細
+      const den = (.38 + .62 * smoothstep(0, .38, s)) * (1 - .22 * smoothstep(.82, 1, s));          // 眉頭淡、眉身實
+      const v = Math.round(255 * den); mx.fillStyle = `rgb(${v},${v},${v})`; mx.beginPath(); mx.arc(p.x - rx, p.y - ry, Math.max(.6, th / 2), 0, 7); mx.fill();
+    }
+    const n = rw * rh, md = mx.getImageData(0, 0, rw, rh).data; let M = new Float32Array(n); for (let i = 0; i < n; i++) M[i] = md[i * 4] / 255;
+    M = blurF(M, rw, rh, Math.max(1, T0 * cfg.bl), 2);
+    const ctx = c2d(out), id = ctx.getImageData(rx, ry, rw, rh), d = id.data, lum = i => (.3 * d[i * 4] + .59 * d[i * 4 + 1] + .11 * d[i * 4 + 2]) / 255;
+    // 周圍皮膚的亮度（排除頭髮、眼睛等暗的地方），用來判斷哪裡是原本的眉毛
+    let s1 = 0, c1 = 0; for (let i = 0; i < n; i++) if (M[i] < .02) { s1 += lum(i); c1++; }
+    const m1 = c1 ? s1 / c1 : .6; let s2 = 0, c2 = 0; for (let i = 0; i < n; i++) if (M[i] < .02) { const L = lum(i); if (L > m1 * .9) { s2 += L; c2++; } }
+    const Ls = Math.max(.08, c2 ? s2 / c2 : m1), a0 = sm[0], a1 = sm[sm.length - 1], an = Math.atan2(a1.y - a0.y, a1.x - a0.x), ca = Math.cos(an), sa = Math.sin(an);
+    for (let y = 0, i = 0; y < rh; y++) for (let x = 0; x < rw; x++, i++) {
+      const m = M[i] * amt; if (m < .004) continue;
+      const o = i * 4, r = d[o] / 255, g = d[o + 1] / 255, b = d[o + 2] / 255, L = .3 * r + .59 * g + .11 * b;
+      const X = x + rx, Y = y + ry, al = (X * ca + Y * sa) / sp, ac = (Y * ca - X * sa) / sp, row = Math.floor(ac / 1.1);
+      const nz = hash2(Math.floor(al / 7 + row * .37), row);                       // 順著眉毛方向的細毛流
+      const hair = smoothstep(.05, .3, (Ls - L) / Ls);                                // 越暗越像原本的眉毛
+      const dd = m * cfg.pw * (1 - cfg.st * .5 + cfg.st * nz);
+      let R = r * (1 - dd * (1 - tone[0])), G = g * (1 - dd * (1 - tone[1])), B = b * (1 - dd * (1 - tone[2])); // 皮膚上：淡淡一層眉粉
+      const kL = L / cl * (1 - .18 * m), hk = m * cfg.hr;                             // 眉毛上：換成眉色、稍微加深，亮度跟著原本的毛
+      R += (Math.min(1, r + (cr * kL - r) * hk) - R) * hair; G += (Math.min(1, g + (cg * kL - g) * hk) - G) * hair; B += (Math.min(1, b + (cb * kL - b) * hk) - B) * hair;
+      d[o] = R * 255; d[o + 1] = G * 255; d[o + 2] = B * 255;
+    }
+    ctx.putImageData(id, rx, ry);
+  });
+}
 function applyMakeup(src, faces, MK) {
   const out = cloneCanvas(src), W = out.width, H = out.height;
   faces.forEach(f => {
     const g = fInfo(f, W, H), fw = g.w, F = faceFrame(f, W, H);
     if (MK.contour.a > 0) paintMask(out, buildFaceMask(f, W, H, contourElems(F, MK.contour.style)), MK.contour.c, MK.contour.a, 'contour');
     if (MK.blush.a > 0) paintMask(out, buildFaceMask(f, W, H, blushElems(F, MK.blush.pos)), MK.blush.c, MK.blush.a, 'blush', MK.blush.tex);
-    if (MK.hl.a > 0) paintMask(out, buildFaceMask(f, W, H, hlElems(F, MK.hl.style)), MK.hl.c, MK.hl.a, 'hl', MK.hl.tex);
+    if (MK.hl.a > 0) paintMask(out, buildFaceMask(f, W, H, hlElems(F, MK.hl.style), { soft: 1.8 }), MK.hl.c, MK.hl.a, 'hl', MK.hl.tex);
     if (MK.lip.a > 0) { const m = polyMask(W, H, [pts(f, LIPS_OUT, W, H)], { cut: [pts(f, LIPS_IN, W, H)], feather: Math.max(1, fw * .007) }); const L = layerOf(m, MK.lip.c); blendOn(out, L, 'color', MK.lip.a * .8); blendOn(out, L, 'multiply', MK.lip.a * .35); blendOn(out, L, 'soft-light', MK.lip.a * .35); }
-    if (MK.brow.a > 0) { const m = polyMask(W, H, [pts(f, BROW_R, W, H), pts(f, BROW_L, W, H)], { feather: Math.max(1, fw * .006) }); blendOn(out, layerOf(m, MK.brow.c), 'multiply', MK.brow.a * .6); }
+    if (MK.brow.a > 0) applyBrow(out, f, MK.brow.c, MK.brow.a, MK.brow.style);
     if (MK.shadow.a > 0) {
       const polys = [[UPPER_R, 33, 133], [UPPER_L, 263, 362]].map(([idx, a, b]) => { const lid = pts(f, idx, W, H), ew = dist(P(f, a, W, H), P(f, b, W, H)); const up = lid.map((p, k) => ({ x: p.x, y: p.y - ew * .42 * Math.sin(Math.PI * k / (lid.length - 1)) - ew * .05 })); return [...lid, ...up.reverse()]; });
       const m = polyMask(W, H, polys, { cut: [pts(f, EYE_R, W, H), pts(f, EYE_L, W, H)], feather: Math.max(1, fw * .018) });
@@ -1445,11 +1533,12 @@ const ICO = {
   collage: '<rect x="3" y="3" width="8" height="18" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/>', poster: '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 7h8M8 11h5"/><rect x="8" y="14" width="8" height="5" rx="1"/>',
   idphoto: '<rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M7.5 18c.8-2.2 2.5-3.2 4.5-3.2s3.7 1 4.5 3.2"/>',
   hsl: '<circle cx="12" cy="12" r="9"/><path d="M12 3v9l7.8 4.5M12 12l-7.8 4.5"/>', curve: '<path d="M4 4v16h16"/><path d="M4 19c6 0 7-13 16-14"/><circle cx="11" cy="12" r="1.6"/>',
+  fx: '<path d="M4 20 15 9"/><path d="m13 7 4 4"/><path d="M18 3v3M16.5 4.5h3M20 10v2M19 11h2M9 3v2M8 4h2"/>',
   recipe: '<path d="M7 3h10a1 1 0 0 1 1 1v17l-6-4-6 4V4a1 1 0 0 1 1-1z"/><path d="M10 8h4M10 11.5h4"/>', batch: '<rect x="8" y="8" width="13" height="13" rx="2.5"/><path d="M5 16V7a2 2 0 0 1 2-2h9"/><path d="m11.5 15 2 2 4-4.5"/>',
 };
 const ic = (k, sw = 1.7) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${ICO[k] || ICO.adjust}</svg>`;
 const TABS = {
-  edit: [['crop', '裁剪', 'crop'], ['adjust', '調整', 'adjust'], ['filter', '濾鏡', 'filter'], ['recipe', '配方', 'recipe'], ['hsl', 'HSL', 'hsl'], ['curve', '曲線', 'curve'], ['text', '文字', 'text'], ['sticker', '貼紙', 'sticker'], ['frame', '邊框', 'frame'], ['mosaic', '馬賽克', 'mosaic'], ['doodle', '塗鴉', 'doodle'], ['erase', 'AI 消除', 'erase'], ['matte', '摳圖', 'matte'], ['upscale', '變清晰', 'upscale']],
+  edit: [['crop', '裁剪', 'crop'], ['adjust', '調整', 'adjust'], ['filter', '濾鏡', 'filter'], ['fx', '特效', 'fx'], ['recipe', '配方', 'recipe'], ['hsl', 'HSL', 'hsl'], ['curve', '曲線', 'curve'], ['text', '文字', 'text'], ['sticker', '貼紙', 'sticker'], ['frame', '邊框', 'frame'], ['mosaic', '馬賽克', 'mosaic'], ['doodle', '塗鴉', 'doodle'], ['erase', 'AI 消除', 'erase'], ['matte', '摳圖', 'matte'], ['upscale', '變清晰', 'upscale']],
   beauty: [['auto', '一鍵美顏', 'auto'], ['smooth', '磨皮', 'smooth'], ['whiten', '美白', 'whiten'], ['acne', '祛痘', 'acne'], ['dark', '黑眼圈', 'dark'], ['eyes2', '亮眼', 'eyes2'], ['teeth', '白牙', 'teeth'], ['shape:slim', '瘦臉', 'slim'], ['shape:eyes', '大眼', 'big'], ['shape:nose', '瘦鼻', 'nose'], ['shape', '臉型', 'shape'], ['makeup:lip', '口紅', 'lip'], ['makeup:blush', '腮紅', 'blush'], ['makeup:contour', '修容', 'contour'], ['makeup:hl', '提亮', 'hl'], ['makeup', '美妝', 'makeup'], ['body:slim', '瘦身', 'body'], ['body:waist', '瘦腰', 'waist'], ['body:tall', '增高', 'tall'], ['filter', '濾鏡', 'filter']],
 };
 function renderTabs() {
@@ -1641,6 +1730,191 @@ TOOLS.filter = {
   apply() { if (FL.id === 'none') return null; const def = FILTERS.find(f => f[0] === FL.id); return putData(filterRun(getData(S.img), def, FL.k)); },
 };
 
+/* ========== 美化：特效（一鍵晴天、海水變藍、草木翠綠…） ========== */
+// 先在小圖上找出天空、水面、亮部，再用雙線性取樣套回原尺寸；全部在手機上算，不用下載模型
+function fxLow(id, max = 220) {
+  const W = id.width, H = id.height, k = Math.min(1, max / Math.max(W, H)), w = Math.max(2, Math.round(W * k)), h = Math.max(2, Math.round(H * k));
+  const s = mkCanvas(w, h), x = s.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(putData(id), 0, 0, w, h);
+  return { d: x.getImageData(0, 0, w, h).data, w, h };
+}
+function fxSampler(a, w, h, W, H) {
+  const sx = w / W, sy = h / H;
+  return (x, y) => {
+    const fx = clamp((x + .5) * sx - .5, 0, w - 1), fy = clamp((y + .5) * sy - .5, 0, h - 1), x0 = fx | 0, y0 = fy | 0, x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1), tx = fx - x0, ty = fy - y0;
+    return (a[y0 * w + x0] * (1 - tx) + a[y0 * w + x1] * tx) * (1 - ty) + (a[y1 * w + x0] * (1 - tx) + a[y1 * w + x1] * tx) * ty;
+  };
+}
+const _hsl = [0, 0, 0], _rgb = [0, 0, 0];
+function rgb2hsl(r, g, b, o) {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, dl = mx - mn; let h = 0, s = 0;
+  if (dl > 1e-5) { s = l > .5 ? dl / (2 - mx - mn) : dl / (mx + mn); h = (mx === r ? (g - b) / dl + (g < b ? 6 : 0) : mx === g ? (b - r) / dl + 2 : (r - g) / dl + 4) * 60; }
+  o[0] = h; o[1] = s; o[2] = l; return o;
+}
+function hsl2rgb(h, s, l, o) {
+  h = (((h % 360) + 360) % 360) / 360; if (s <= 0) { o[0] = o[1] = o[2] = l; return o; }
+  const q = l < .5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q; o[0] = hue2(p, q, h + 1 / 3); o[1] = hue2(p, q, h); o[2] = hue2(p, q, h - 1 / 3); return o;
+}
+const hueDiff = (to, from) => ((to - from + 540) % 360) - 180;
+const hueBand = (h, a, b, f) => { if (b > 360 && h < a - f) h += 360; return smoothstep(a - f, a, h) * (1 - smoothstep(b, b + f, h)); };
+// 找天空：上緣開始往下長，只收「藍色」或「亮灰白、沒有紋理」的區域，碰到地平線、樹、建築的明顯邊界就停
+function fxSky(lo) {
+  const { d, w, h } = lo, n = w * h, Y = new Float32Array(n), cand = new Uint8Array(n);
+  for (let i = 0; i < n; i++) Y[i] = (.299 * d[i * 4] + .587 * d[i * 4 + 1] + .114 * d[i * 4 + 2]) / 255;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x, r = d[i * 4] / 255, g = d[i * 4 + 1] / 255, b = d[i * 4 + 2] / 255, sat = Math.max(r, g, b) - Math.min(r, g, b);
+    const gx = Math.abs(Y[y * w + Math.min(w - 1, x + 1)] - Y[y * w + Math.max(0, x - 1)]), gy = Math.abs(Y[Math.min(h - 1, y + 1) * w + x] - Y[Math.max(0, y - 1) * w + x]);
+    const blue = b > r + .03 && b >= g - .04 && Y[i] > .28 && sat > .05, gray = Y[i] > .48 && sat < .14;
+    cand[i] = (blue || gray) && gx + gy < .1 && y < h * .82 ? 1 : 0;
+  }
+  const m = new Float32Array(n), q = new Int32Array(n); let qh = 0, qt = 0;
+  for (let x = 0; x < w; x++) if (cand[x]) { m[x] = 1; q[qt++] = x; }
+  while (qh < qt) {
+    const i = q[qh++], x = i % w, y = (i / w) | 0;
+    for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) if (j >= 0 && !m[j] && cand[j] && Math.abs(Y[j] - Y[i]) < .07) { m[j] = 1; q[qt++] = j; }
+  }
+  if (qt < n * .03) return null;
+  let yh = 0; for (let y = 0; y < h; y++) { let c = 0; for (let x = 0; x < w; x++) c += m[y * w + x]; if (c > w * .12) yh = y; }
+  let sr = 0, sg = 0, sb = 0, sY = 0, sY2 = 0;
+  for (let i = 0; i < n; i++) if (m[i]) { sr += d[i * 4]; sg += d[i * 4 + 1]; sb += d[i * 4 + 2]; sY += Y[i]; sY2 += Y[i] * Y[i]; }
+  const mY = sY / qt, sd = Math.sqrt(Math.max(0, sY2 / qt - mY * mY));
+  return { m: blurF(m, w, h, 1.2, 2), w, h, yh: Math.max(.08, (yh + 1) / h), mY, sd, blue: (sb - sr) / qt / 255 > .05 };
+}
+// 天空可能性（原尺寸逐點）：讓天空邊緣貼著樹枝、屋頂
+function skyLike(r, g, b, Y, sky) {
+  const sat = Math.max(r, g, b) - Math.min(r, g, b), lo = sky.mY - 2.2 * sky.sd;
+  return Math.max(smoothstep(0, .07, b - r) * smoothstep(.22, .38, Y), smoothstep(lo - .1, lo + .02, Y) * (1 - smoothstep(.12, .24, sat)));
+}
+const SKY_SUNNY = [[0, [.18, .44, .86]], [1, [.66, .84, .97]]];
+const SKY_SUNSET = [[0, [.29, .25, .55]], [.5, [.93, .5, .55]], [1, [1, .74, .45]]];
+const SKY_SAKURA = [[0, [.72, .7, .93]], [1, [1, .84, .9]]];
+function gradAt(st, t) { for (let i = 1; i < st.length; i++) if (t <= st[i][0] || i === st.length - 1) { const [a, ca] = st[i - 1], [b, cb] = st[i], u = clamp((t - a) / (b - a), 0, 1); return [ca[0] + (cb[0] - ca[0]) * u, ca[1] + (cb[1] - ca[1]) * u, ca[2] + (cb[2] - ca[2]) * u]; } return st[0][1]; }
+// 換天空：保留原本雲的明暗，藍天部分換成漸層
+function paintSky(r, g, b, Y, ty, sky, grad, cloudTint, o) {
+  const [gr, gg, gb] = gradAt(grad, Math.pow(clamp(ty, 0, 1), .8));
+  const whiteSky = (1 - smoothstep(.02, .09, b - r)) * smoothstep(.5, .8, Y);
+  const cloud = Math.max(smoothstep(sky.mY + .01, sky.mY + .02 + Math.max(.07, 1.6 * sky.sd), Y), sky.blue ? whiteSky : 0) * .92;
+  const tex = clamp(.9 + .6 * (Y - sky.mY), .7, 1.15), cv = clamp(.5 + .52 * Y, 0, 1);
+  o[0] = gr * tex * (1 - cloud) + cv * cloudTint[0] * cloud; o[1] = gg * tex * (1 - cloud) + cv * cloudTint[1] * cloud; o[2] = gb * tex * (1 - cloud) + cv * cloudTint[2] * cloud;
+}
+// 亮部光暈（夜景、金色陽光）
+function fxGlow(lo) { const { d, w, h } = lo, n = w * h, a = new Float32Array(n); for (let i = 0; i < n; i++) { const Y = (.299 * d[i * 4] + .587 * d[i * 4 + 1] + .114 * d[i * 4 + 2]) / 255; a[i] = Math.max(0, Y - .72) / .28; } return blurF(a, w, h, Math.max(2, w / 28), 3); }
+const satMix = (o, k) => { const y = .299 * o[0] + .587 * o[1] + .114 * o[2]; o[0] = y + (o[0] - y) * k; o[1] = y + (o[1] - y) * k; o[2] = y + (o[2] - y) * k; };
+const expo = (v, g) => linToS(soft1(_toLin[clamp(Math.round(v * 255), 0, 255)] * g)) / 255;
+const FX_LIST = [['none', '原圖'], ['sunny', '一鍵晴天'], ['sea', '海水湛藍'], ['green', '草木翠綠'], ['sunset', '晚霞'], ['golden', '金色陽光'], ['clear', '去霧通透'], ['hdr', 'HDR 增亮'], ['night', '夜景'], ['autumn', '秋楓'], ['sakura', '櫻花粉']];
+let fxMiss = null; // 最近一次：需要天空／水面卻沒找到
+function fxRun(id, key, k) {
+  fxMiss = null; if (key === 'none' || k <= 0) return id;
+  const W = id.width, H = id.height, d = id.data, lo = fxLow(id), o = _rgb, hs = _hsl;
+  const needSky = ['sunny', 'sunset', 'sea', 'sakura'].includes(key), sky = needSky ? fxSky(lo) : null;
+  const skyS = sky ? fxSampler(sky.m, sky.w, sky.h, W, H) : null;
+  if ((key === 'sunny' || key === 'sunset') && !sky) fxMiss = '沒有找到明顯的天空，先幫你整體調亮調色';
+  let water = null, glow = null, haze = null, base = null;
+  if (key === 'sea') {
+    const { d: ld, w, h } = lo, n = w * h, c = new Float32Array(n), top = sky ? sky.yh - .03 : .15;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x; if (y / h < top) continue;
+      const r = ld[i * 4] / 255, g = ld[i * 4 + 1] / 255, b = ld[i * 4 + 2] / 255, Y = .299 * r + .587 * g + .114 * b; rgb2hsl(r, g, b, hs);
+      const v = hueBand(hs[0], 150, 250, 22) * smoothstep(.05, .14, hs[1]) + (hs[1] < .14 && b >= r - .01 && Y > .18 && Y < .85 ? .6 : 0);
+      c[i] = Math.min(1, v) * (sky ? 1 - sky.m[i] : 1);
+    }
+    const sup = blurF(c, w, h, Math.max(2, w / 22), 2); let tot = 0; for (let i = 0; i < n; i++) { sup[i] = smoothstep(.3, .62, sup[i]); tot += sup[i]; }
+    if (tot < n * .03) fxMiss = '沒有找到明顯的海或湖面，只加強畫面裡的藍色';
+    water = fxSampler(sup, w, h, W, H);
+  }
+  if (key === 'golden' || key === 'night') glow = fxSampler(fxGlow(lo), lo.w, lo.h, W, H);
+  if (key === 'clear') {
+    const { d: ld, w, h } = lo, n = w * h, dc = new Float32Array(n); let A = [0, 0, 0], cnt = 0;
+    for (let i = 0; i < n; i++) dc[i] = Math.min(ld[i * 4], ld[i * 4 + 1], ld[i * 4 + 2]) / 255;
+    const srt = Float32Array.from(dc).sort(), th = srt[Math.floor(n * .995)];
+    for (let i = 0; i < n; i++) if (dc[i] >= th) { A[0] += ld[i * 4]; A[1] += ld[i * 4 + 1]; A[2] += ld[i * 4 + 2]; cnt++; }
+    A = A.map(v => clamp(v / cnt / 255, .5, 1)); const Am = Math.max(...A), bl = blurF(dc, w, h, Math.max(2, w / 40), 2), t = new Float32Array(n);
+    for (let i = 0; i < n; i++) t[i] = clamp(1 - .8 * bl[i] / Am, .35, 1);
+    haze = { t: fxSampler(t, w, h, W, H), A };
+  }
+  if (key === 'hdr' || key === 'night') {
+    const { d: ld, w, h } = lo, n = w * h, Y = new Float32Array(n); for (let i = 0; i < n; i++) Y[i] = (.299 * ld[i * 4] + .587 * ld[i * 4 + 1] + .114 * ld[i * 4 + 2]) / 255;
+    base = fxSampler(blurF(Y, w, h, Math.max(2, w / 30), 3), w, h, W, H);
+  }
+  let corner = 1; if (key === 'golden') { const { d: ld, w, h } = lo; let a = 0, b = 0; for (let y = 0; y < h / 3; y++) for (let x = 0; x < w / 3; x++) { a += ld[(y * w + x) * 4]; b += ld[(y * w + w - 1 - x) * 4]; } corner = a > b ? 0 : 1; }
+  const diag = Math.hypot(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = (y * W + x) * 4, r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255, Y = .299 * r + .587 * g + .114 * b;
+    o[0] = r; o[1] = g; o[2] = b;
+    if (key === 'sunny' || key === 'sunset') {
+      const sun = key === 'sunny', p = sky ? skyS(x, y) : 0, ps = p < .01 ? 0 : smoothstep(0, .5, p) * (.08 + .92 * skyLike(r, g, b, Y, sky));
+      // 地面：晴天＝提亮、偏暖、加一點飽和；晚霞＝暖橘、略壓暗、加對比
+      const gx = sun ? 1 + .32 * k : 1 - .06 * k;
+      o[0] = expo(r, gx * (1 + (sun ? .05 : .16) * k)); o[1] = expo(g, gx * (1 + (sun ? .01 : .02) * k)); o[2] = expo(b, gx * (1 - (sun ? .05 : .2) * k)); satMix(o, 1 + (sun ? .2 : .12) * k);
+      if (!sun) { const c = 1 + .1 * k; o[0] = (o[0] - .5) * c + .5; o[1] = (o[1] - .5) * c + .5; o[2] = (o[2] - .5) * c + .5; }
+      if (ps > 0) {
+        const fr = o[0], fg = o[1], fb = o[2]; paintSky(r, g, b, Y, y / H / sky.yh, sky, sun ? SKY_SUNNY : SKY_SUNSET, sun ? [1, 1, 1.02] : [1, .8, .7], o);
+        const t = ps * k; o[0] = fr + (o[0] - fr) * t; o[1] = fg + (o[1] - fg) * t; o[2] = fb + (o[2] - fb) * t;
+      }
+    } else if (key === 'sea') {
+      rgb2hsl(r, g, b, hs); const own = Math.max(hueBand(hs[0], 140, 260, 25) * smoothstep(.03, .1, hs[1]), hs[1] < .14 && b >= r - .02 ? .7 : 0);
+      const w = Math.min(1, water(x, y) * own + (fxMiss ? own * hueBand(hs[0], 180, 250, 20) * .5 : 0)) * k;
+      if (w > .003) {
+        const tgt = 190 + 20 * (1 - hs[2]), h2 = hs[1] < .1 ? tgt : hs[0] + hueDiff(tgt, hs[0]) * Math.min(1, w * 1.1);
+        const s2 = hs[1] + (Math.min(.85, hs[1] * 1.8 + .4) - hs[1]) * w; hsl2rgb(h2, s2, hs[2] * (1 + .04 * w), o);
+        if (hs[1] < .1) { o[0] = r + (o[0] - r) * w; o[1] = g + (o[1] - g) * w; o[2] = b + (o[2] - b) * w; }
+      }
+    } else if (key === 'green' || key === 'autumn') {
+      rgb2hsl(r, g, b, hs); const w = hueBand(hs[0], 52, 170, 18) * smoothstep(.06, .18, hs[1]) * (1 - skinProb(d[i], d[i + 1], d[i + 2])) * k;
+      if (w > .003) { const au = key === 'autumn', tgt = au ? 28 : 105; hsl2rgb(hs[0] + hueDiff(tgt, hs[0]) * w * (au ? .95 : .45), Math.min(1, hs[1] * (1 + (au ? .35 : .55) * w)), hs[2] * (1 + .04 * w), o); }
+      if (key === 'autumn') { o[0] *= 1 + .06 * k; o[2] *= 1 - .06 * k; }
+    } else if (key === 'golden') {
+      const dx = (corner ? W - x : x), q = Math.hypot(dx, y) / diag, lw = Math.pow(1 - smoothstep(0, 1.05, q), 2) * .55 * k, gw = glow(x, y) * .6 * k;
+      o[0] = expo(r, 1 + .06 * k); o[1] = expo(g, 1 + .01 * k); o[2] = expo(b, 1 - .1 * k);
+      const L = [1, .72, .38]; for (let c = 0; c < 3; c++) { const a = L[c] * (lw + gw); o[c] = 1 - (1 - o[c]) * (1 - a); }
+    } else if (key === 'clear') {
+      const t = 1 - (1 - haze.t(x, y)) * k, A = haze.A;
+      for (let c = 0; c < 3; c++) o[c] = ((c ? c === 1 ? g : b : r) - A[c]) / t + A[c];
+      for (let c = 0; c < 3; c++) o[c] = clamp(o[c], 0, 1) * (1 + .08 * k); satMix(o, 1 + .12 * k);
+    } else if (key === 'hdr' || key === 'night') {
+      const b0 = base(x, y), dl = Y - b0, bs = Math.max(.02, b0 + dl * .85 * smoothstep(.06, .22, Math.abs(dl))), det = Math.max(.02, Y) / bs, lift = key === 'hdr' ? .3 : .34;
+      let nb = Math.pow(bs, 1 - lift * k); nb -= .38 * k * smoothstep(.6, 1, nb) * (nb - .6);
+      const Ln = nb * Math.pow(det, 1 + .35 * k), sc = Ln / Math.max(.02, Y); o[0] = r * sc; o[1] = g * sc; o[2] = b * sc; satMix(o, 1 + .1 * k);
+      if (key === 'night') {
+        const yy = clamp(.299 * o[0] + .587 * o[1] + .114 * o[2], 0, 1), sw = (1 - yy) * (1 - yy), hw = yy * yy, gw = glow(x, y) * .55 * k;
+        o[0] += (.07 * hw - .035 * sw) * k; o[1] += .015 * sw * k; o[2] += (.08 * sw - .06 * hw) * k;
+        const L = [1, .78, .5]; for (let c = 0; c < 3; c++) { o[c] = clamp(o[c], 0, 1); o[c] = 1 - (1 - o[c]) * (1 - L[c] * gw); }
+      }
+    } else if (key === 'sakura') {
+      rgb2hsl(r, g, b, hs); const rw = hueBand(hs[0], 300, 385, 20) * smoothstep(.08, .2, hs[1]) * (1 - skinProb(d[i], d[i + 1], d[i + 2]) * .7) * k;
+      if (rw > .003) hsl2rgb(hs[0] + hueDiff(338, hs[0]) * rw * .6, hs[1], hs[2], o);
+      o[0] = expo(o[0], 1 + .14 * k); o[1] = expo(o[1], 1 + .06 * k); o[2] = expo(o[2], 1 + .12 * k);
+      const yy = .299 * o[0] + .587 * o[1] + .114 * o[2]; o[0] += .05 * k * yy; o[1] -= .012 * k * yy; o[2] += .03 * k * yy; satMix(o, 1 - .06 * k);
+      if (sky) { const p = skyS(x, y), ps = p < .01 ? 0 : smoothstep(0, .5, p) * (.08 + .92 * skyLike(r, g, b, Y, sky)) * .7 * k; if (ps > 0) { const fr = o[0], fg = o[1], fb = o[2]; paintSky(r, g, b, Y, y / H / sky.yh, sky, SKY_SAKURA, [1, .95, .97], o); o[0] = fr + (o[0] - fr) * ps; o[1] = fg + (o[1] - fg) * ps; o[2] = fb + (o[2] - fb) * ps; } }
+    }
+    d[i] = o[0] * 255; d[i + 1] = o[1] * 255; d[i + 2] = o[2] * 255;
+  }
+  return id;
+}
+const FX = { id: 'none', k: 80, thumbs: null, thumbSrc: null };
+TOOLS.fx = {
+  name: '特效', heavy: true,
+  init() {
+    FX.id = 'none'; FX.k = 80;
+    if (FX.thumbSrc !== S.img) {
+      const p = proxy(), t = mkCanvas(128, 128), m = Math.min(p.width, p.height);
+      t.getContext('2d').drawImage(p, (p.width - m) / 2, (p.height - m) / 2, m, m, 0, 0, 128, 128);
+      FX.thumbs = FX_LIST.map(([key]) => putData(fxRun(getData(t), key, 1))); FX.thumbSrc = S.img; fxMiss = null;
+    }
+    refreshUI();
+  },
+  restore(st) { this.init(); FX.id = st.id; FX.k = st.k; refreshUI(); this.pv(); },
+  state() { return FX.id !== 'none' ? { id: FX.id, k: FX.k } : null; },
+  rec() { return FX.id !== 'none' ? [{ t: 'fx', id: FX.id, k: FX.k }] : null; },
+  ui() { return `<div class="thumbs">${FX_LIST.map((f, i) => `<button class="th ${FX.id === f[0] ? 'on' : ''}" data-xi="${i}"><canvas width="128" height="128" data-xt="${i}"></canvas>${f[1]}</button>`).join('')}</div>` + (FX.id !== 'none' ? sl('fxK', '強度', 0, 100, FX.k) : '<p class="note">一鍵把陰天變晴天、讓海更藍、草木更綠，也有晚霞、夜景、去霧等效果。</p>'); },
+  bind(r) {
+    if (FX.thumbs) $$('canvas[data-xt]', r).forEach(c => c.getContext('2d').drawImage(FX.thumbs[+c.dataset.xt], 0, 0));
+    on(r, '[data-xi]', b => { FX.id = FX_LIST[+b.dataset.xi][0]; refreshUI(); this.pv(); });
+    $('#fxK', r)?.addEventListener('input', e => { FX.k = +e.target.value; this.pv(); });
+  },
+  pv() { if (FX.id === 'none') { setPreview(null); hint(null); return; } livePreview(id => { const r = fxRun(id, FX.id, FX.k / 100); hint(fxMiss); return r; }); },
+  apply(task) { if (FX.id === 'none') return null; task?.status('處理原尺寸照片…'); return putData(fxRun(getData(S.img), FX.id, FX.k / 100)); },
+};
+
 /* ========== 美化：HSL（單獨調某個顏色） ========== */
 const HSL_BANDS = [['紅', 0, '#ec3b3b'], ['橙', 30, '#ff9126'], ['黃', 58, '#f4cf1f'], ['綠', 120, '#3fbf55'], ['青', 182, '#25c0d3'], ['藍', 222, '#3d6cf0'], ['紫', 272, '#9a55ef'], ['洋紅', 318, '#ec46b0']];
 const hslZero = () => HSL_BANDS.map(() => [0, 0, 0]);
@@ -1784,6 +2058,7 @@ function opsProcess(id, ops) {
     else if (o.t === 'flt') { const def = FILTERS.find(f => f[0] === o.id); if (def && def[0] !== 'none') filterRun(id, def, o.k); }
     else if (o.t === 'hsl') hslProcess(id, o.v);
     else if (o.t === 'crv') curveProcess(id, o.p);
+    else if (o.t === 'fx') fxRun(id, o.id, o.k / 100);
     else if (o.t === 'mix') { const base = new ImageData(new Uint8ClampedArray(id.data), id.width, id.height); opsProcess(id, o.ops); mixData(base, id, o.k / 100); }
   }
   return id;
@@ -1807,6 +2082,7 @@ function rcSanOps(ops, depth = 0) {
     if (!o || typeof o !== 'object') continue;
     if (o.t === 'adj' && o.p && typeof o.p === 'object') { const p = {}; for (const k of Object.keys(C0)) if (o.p[k]) p[k] = num(o.p[k], -100, 100); if (Object.keys(p).length) out.push({ t: 'adj', p }); }
     else if (o.t === 'flt' && FILTERS.some(f => f[0] === o.id && f[0] !== 'none')) out.push({ t: 'flt', id: o.id, k: num(o.k, 0, 100) });
+    else if (o.t === 'fx' && FX_LIST.some(f => f[0] === o.id && f[0] !== 'none')) out.push({ t: 'fx', id: o.id, k: num(o.k, 0, 100) });
     else if (o.t === 'hsl' && Array.isArray(o.v)) out.push({ t: 'hsl', v: HSL_BANDS.map((_, i) => [0, 1, 2].map(j => num(Array.isArray(o.v[i]) ? o.v[i][j] : 0, -100, 100))) });
     else if (o.t === 'crv' && o.p && typeof o.p === 'object') { const p = {}; for (const c of ['rgb', 'r', 'g', 'b']) { let a = Array.isArray(o.p[c]) ? o.p[c].slice(0, 12).filter(Array.isArray).map(q => [num(q[0], 0, 255), num(q[1], 0, 255)]).sort((x, y) => x[0] - y[0]) : null; if (!a || a.length < 2) a = cvLine(); p[c] = a; } out.push({ t: 'crv', p }); }
     else if (o.t === 'mix' && depth === 0) { const inner = rcSanOps(o.ops, 1); if (inner.length) out.push({ t: 'mix', k: num(o.k, 0, 100), ops: inner }); }
@@ -2250,7 +2526,7 @@ const MK_PAL = {
   hl: ['#fff4e6', '#ffffff', '#ffe4ec', '#ffe2b0', '#efe6ff'],
 };
 const MK_NAMES = [['lip', '口紅'], ['blush', '腮紅'], ['contour', '修容'], ['hl', '提亮'], ['brow', '眉毛'], ['shadow', '眼影']];
-const MK = { k: 'lip', lip: { c: '#e53950', a: 0 }, blush: { c: '#ff8fa3', a: 0, pos: 'apple', tex: 'satin' }, brow: { c: '#5a3d2b', a: 0 }, shadow: { c: '#b5838d', a: 0 }, contour: { c: '#6f5246', a: 0, style: 'natural' }, hl: { c: '#fff4e6', a: 0, style: 't', tex: 'soft' } };
+const MK = { k: 'lip', lip: { c: '#e53950', a: 0 }, blush: { c: '#ff8fa3', a: 0, pos: 'apple', tex: 'satin' }, brow: { c: '#5a3d2b', a: 0, style: 'natural' }, shadow: { c: '#b5838d', a: 0 }, contour: { c: '#6f5246', a: 0, style: 'natural' }, hl: { c: '#fff4e6', a: 0, style: 't', tex: 'soft' } };
 const mkRow = (label, html) => `<p class="mkl">${label}</p>${html}`;
 TOOLS.makeup = {
   name: '美妝', heavy: true,
@@ -2259,6 +2535,7 @@ TOOLS.makeup = {
     const it = MK[MK.k]; let h = chips(MK_NAMES.map(([k, l]) => [k, l + (MK[k].a ? '•' : '')]), MK.k, 'mkk');
     if (MK.k === 'blush') h += mkRow('位置', chips(BLUSH_POS, it.pos, 'mkp')) + mkRow('質地', chips(BLUSH_TEX, it.tex, 'mkt'));
     if (MK.k === 'contour') h += mkRow('樣式', chips(CONTOUR_STYLES, it.style, 'mks'));
+    if (MK.k === 'brow') h += mkRow('眉型', chips(BROW_STYLES, it.style, 'mks'));
     if (MK.k === 'hl') h += mkRow('位置', chips(HL_STYLES, it.style, 'mks')) + mkRow('質地', chips(HL_TEX, it.tex, 'mkt'));
     return h + mkRow('顏色', swatches(MK_PAL[MK.k], it.c, 'mkc')) + sl('mkA', '濃淡', 0, 100, Math.round(it.a * 100));
   },
