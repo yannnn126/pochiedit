@@ -342,7 +342,7 @@ async function loadPhoto(file) {
   const c = mkCanvas(w, h), x = c.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(bmp, 0, 0, w, h); bmp.close?.();
   return c;
 }
-function setDocument(c) { S.orig = S.img = c; S.hist = []; S.fut = []; S.preview = null; S.faces = null; S.pose = null; S.ops = []; S.last = null; S.reEdit = null; updateTop(); }
+function setDocument(c) { S.orig = S.img = c; S.hist = []; S.fut = []; S.preview = null; S.faces = null; S.pose = null; SEG = null; S.ops = []; S.last = null; S.reEdit = null; updateTop(); }
 
 /* ========== 編輯畫布（觸控） ========== */
 const ev = $('#ev'), ectx = ev.getContext('2d');
@@ -776,27 +776,51 @@ function bSmooth(id, faces, amt) {
   const fw = faces.length ? Math.max(...faces.map(f => fInfo(f, W, H).w)) : Math.min(W, H) * .5;
   const r = clamp(fw / 42, 1.5, 36), [R, G, B] = splitRGB(d, n);
   const bR = blurF(R, W, H, r), bG = blurF(G, W, H, r), bB = blurF(B, W, H, r);
-  const reg = faceSkinRegion(W, H, faces);
+  const seg = skinAt(W, H), reg = seg ? null : faceSkinRegion(W, H, faces);
   for (let i = 0; i < n; i++) {
     const o = i * 4, r0 = d[o], g0 = d[o + 1], b0 = d[o + 2];
-    const sk = skinProb(r0, g0, b0), rg = reg ? reg[i] : 1; if (rg <= 0) continue;
+    const sk = seg ? seg[i] : skinProb(r0, g0, b0), rg = reg ? reg[i] : 1; if (rg <= 0 || sk <= .004) continue;
     const diff = (Math.abs(bR[i] - r0) + Math.abs(bG[i] - g0) + Math.abs(bB[i] - b0)) / 3;
-    const w = amt * rg * (reg ? .4 + .6 * sk : sk) * clamp(1 - diff / 40, 0, 1);
+    const w = amt * rg * (seg ? sk : reg ? .4 + .6 * sk : sk) * clamp(1 - diff / 40, 0, 1);
     if (w <= 0) continue;
     d[o] = r0 + (bR[i] - r0) * w; d[o + 1] = g0 + (bG[i] - g0) * w; d[o + 2] = b0 + (bB[i] - b0) * w;
   }
   return id;
 }
+// 皮膚權重（0~1）：優先用人像分割；沒有時退回「平滑過的膚色判斷 ＋ 臉部範圍」，避免逐點判斷造成的斑駁雜訊
+function fallbackSkin(id, faces) {
+  const { width: W, height: H, data: d } = id, n = W * H, sp = new Float32Array(n);
+  for (let i = 0; i < n; i++) sp[i] = skinProb(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
+  const fw = faces.length ? Math.max(...faces.map(f => fInfo(f, W, H).w)) : Math.min(W, H) * .3;
+  const b = blurF(sp, W, H, Math.max(2, fw / 30), 2), reg = faceSkinRegion(W, H, faces);
+  // 有臉時，只處理臉附近（臉、脖子、肩頸），避免米色牆面、木頭被一起刷白
+  let near = null;
+  if (faces.length) {
+    const c = mkCanvas(W, H), x = c.getContext('2d'); x.fillStyle = '#fff';
+    faces.forEach(f => { const g = fInfo(f, W, H); x.beginPath(); x.ellipse(g.nose.x, g.nose.y + g.h * .55, g.w * 1.1, g.h * 1.35, 0, 0, 7); x.fill(); });
+    near = maskAlpha(featherAlpha(c, fw * .25));
+  }
+  for (let i = 0; i < n; i++) { const v = smoothstep(.15, .6, b[i]) * (near ? near[i] : 1); b[i] = reg ? Math.max(reg[i] * smoothstep(.05, .4, b[i]), v * .7) : v; }
+  return b;
+}
+function skinMap(id, faces) { return skinAt(id.width, id.height) || fallbackSkin(id, faces); }
+// 美白：只處理皮膚；在低頻的膚色層提亮（保留亮部、不過曝），細節原封不動加回去，再微微去黃、降一點飽和
 function bWhiten(id, faces, amt) {
   if (amt <= 0) return id;
-  const d = id.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const r = d[i], g = d[i + 1], b = d[i + 2], sk = skinProb(r, g, b); if (sk <= 0) continue;
-    const k = amt * sk, L = .299 * r + .587 * g + .114 * b;
-    let nr = r + (255 - r) * k * .32, ng = g + (255 - g) * k * .3, nb = b + (255 - b) * k * .3;
-    const L2 = .299 * nr + .587 * ng + .114 * nb, ds = k * .18;
-    nr = nr + (L2 - nr) * ds + k * 5; ng = ng + (L2 - ng) * ds; nb = nb + (L2 - nb) * ds + k * 2;
-    d[i] = nr; d[i + 1] = ng; d[i + 2] = nb;
+  const { width: W, height: H, data: d } = id, n = W * H, m = skinMap(id, faces);
+  const fw = faces.length ? Math.max(...faces.map(f => fInfo(f, W, H).w)) : Math.min(W, H) * .3;
+  const Y = new Float32Array(n);
+  for (let i = 0; i < n; i++) Y[i] = (.299 * d[i * 4] + .587 * d[i * 4 + 1] + .114 * d[i * 4 + 2]) / 255;
+  const base = blurF(Y, W, H, Math.max(1.5, fw / 60), 2), g = .95 * amt;
+  for (let i = 0; i < n; i++) {
+    const w = m[i]; if (w < .004) continue;
+    const o = i * 4, bs = base[i], k = w * g;
+    const lift = (1 - Math.pow(1 - bs, 1 + k) - bs) * 255;      // 曲線提亮：中間調提最多，亮部幾乎不動
+    let r = d[o] + lift, gg = d[o + 1] + lift, b = d[o + 2] + lift;
+    const y = .299 * r + .587 * gg + .114 * b, cs = 1 - .2 * w * amt;      // 降一點飽和
+    let cb = (-.168736 * r - .331264 * gg + .5 * b) * cs + 7 * w * amt;   // 去黃（往藍偏一點）
+    let cr = (.5 * r - .418688 * gg - .081312 * b) * cs + 1.5 * w * amt;  // 保留一點血色
+    d[o] = y + 1.402 * cr; d[o + 1] = y - .344136 * cb - .714136 * cr; d[o + 2] = y + 1.772 * cb;
   }
   return id;
 }
@@ -916,20 +940,89 @@ function faceWarps(faces, W, H, p) {
 }
 function poseInfo(pose, W, H) {
   const g = i => ({ x: pose[i].x * W, y: pose[i].y * H, v: pose[i].visibility ?? 1 });
-  const ls = g(11), rs = g(12), lh = g(23), rh = g(24), lk = g(25), rk = g(26);
-  const sh = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 }, hp = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 }, kn = { x: (lk.x + rk.x) / 2, y: (lk.y + rk.y) / 2 };
-  return { sh, hp, kn, shW: dist(ls, rs), hpW: Math.max(dist(lh, rh), dist(ls, rs) * .55), kneeOk: lk.v > .3 && rk.v > .3 };
+  const ls = g(11), rs = g(12), lh = g(23), rh = g(24), lk = g(25), rk = g(26), la = g(27), ra = g(28);
+  const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const sh = mid(ls, rs), hp = mid(lh, rh), kn = mid(lk, rk), an = mid(la, ra);
+  return { sh, hp, kn, an, shW: dist(ls, rs), hpW: Math.max(dist(lh, rh), dist(ls, rs) * .55), kneeOk: lk.v > .3 && rk.v > .3, ankleOk: la.v > .3 && ra.v > .3 };
 }
-function bodyWarps(pose, W, H, p) {
-  const b = poseInfo(pose, W, H), ws = [], lerp = (a, c, t) => ({ x: a.x + (c.x - a.x) * t, y: a.y + (c.y - a.y) * t });
-  const side = (c, half, amt, r) => { ws.push(wMove(c.x - half, c.y, r, half * amt, 0)); ws.push(wMove(c.x + half, c.y, r, -half * amt, 0)); };
-  if (p.waist) { const c = lerp(b.hp, b.sh, .3); side(c, b.hpW * .9, .2 * p.waist, b.hpW * .85); }
-  if (p.slim) {
-    const kn = b.kneeOk ? b.kn : { x: b.hp.x, y: b.hp.y + (b.hp.y - b.sh.y) * .9 };
-    [[lerp(b.sh, b.hp, .2), b.shW * .55], [lerp(b.sh, b.hp, .62), b.hpW * .9], [b.hp, b.hpW * 1.05], [lerp(b.hp, kn, .45), b.hpW * .85]]
-      .forEach(([c, half]) => side(c, half, .14 * p.slim, half * 1.0));
+// 每一列的「身體左右邊界」：用人像分割找真正的輪廓；沒有分割結果時，用骨架估計
+function bodyProfile(pose, W, H, seg) {
+  const b = poseInfo(pose, W, H), torso = Math.max(1, b.hp.y - b.sh.y);
+  const kn = b.kneeOk ? b.kn : { x: b.hp.x, y: b.hp.y + torso * .9 }, an = b.ankleOk ? b.an : { x: kn.x, y: kn.y + torso * .9 };
+  const knots = [[b.sh.y - torso, b.sh.x], [b.sh.y, b.sh.x], [b.hp.y, b.hp.x], [kn.y, kn.x], [an.y, an.x]];
+  const cxAt = y => { if (y <= knots[0][0]) return knots[0][1]; for (let i = 1; i < knots.length; i++) if (y <= knots[i][0]) { const [y0, x0] = knots[i - 1], [y1, x1] = knots[i], t = (y - y0) / Math.max(1e-6, y1 - y0); return x0 + (x1 - x0) * t; } return knots[knots.length - 1][1]; };
+  const cx = new Float32Array(H), oL = new Float32Array(H), oR = new Float32Array(H), iL = new Float32Array(H), iR = new Float32Array(H);
+  const win = Math.max(b.shW * 1.3, b.hpW * 1.6);
+  for (let y = 0; y < H; y++) cx[y] = cxAt(y);
+  if (seg) {
+    const k = seg.w / W, pm = seg.person, sw = seg.w, sh = seg.h;
+    for (let y = 0; y < H; y++) {
+      const my = clamp(Math.round(y * k), 0, sh - 1), row = my * sw, c = cx[y] * k, wn = win * k;
+      const a = clamp(Math.round(c - wn), 0, sw - 1), z = clamp(Math.round(c + wn), 0, sw - 1), cc = clamp(Math.round(c), 0, sw - 1);
+      let l = -1, r = -1;
+      for (let x = a; x <= cc; x++) if (pm[row + x] > .5) { l = x; break; }
+      for (let x = z; x >= cc; x--) if (pm[row + x] > .5) { r = x; break; }
+      oL[y] = l < 0 ? 0 : (c - l) / k; oR[y] = r < 0 ? 0 : (r - c) / k;
+      // 內側輪廓：從中線往外找，遇到空隙（手臂與腰之間）就停
+      let il = cc, ir = cc, gap = 0;
+      if (pm[row + cc] > .5) {
+        const gmax = Math.max(2, Math.round(b.shW * k * .03));
+        for (let x = cc; x >= a; x--) { if (pm[row + x] > .5) { il = x; gap = 0; } else if (++gap > gmax) break; }
+        gap = 0; for (let x = cc; x <= z; x++) { if (pm[row + x] > .5) { ir = x; gap = 0; } else if (++gap > gmax) break; }
+        iL[y] = (c - il) / k; iR[y] = (ir - c) / k;
+      } else { iL[y] = oL[y]; iR[y] = oR[y]; }
+    }
+  } else {
+    for (let y = 0; y < H; y++) {
+      const t = clamp((y - b.sh.y) / torso, 0, 1), hw = y < b.hp.y ? b.shW * .62 + (b.hpW * .95 - b.shW * .62) * t : b.hpW * .95 * (1 - .25 * clamp((y - b.hp.y) / Math.max(1, kn.y - b.hp.y), 0, 1));
+      oL[y] = oR[y] = iL[y] = iR[y] = hw;
+    }
   }
-  return ws;
+  // 沿垂直方向平滑邊界，避免輪廓鋸齒造成扭曲
+  const sm = (a, f) => blurF(a, 1, H, Math.max(2, Math.round(torso * f)), 3);
+  return { b, torso, kn, an, cx: sm(cx, .05), oL: sm(oL, .14), oR: sm(oR, .14), iL: sm(iL, .06), iR: sm(iR, .06) };
+}
+// 一維對應：身體範圍內往中線壓縮 s，外側一段背景平滑拉開補上，再外面維持不動（水平線永遠保持筆直）
+function inv1(u, hw, s, B) {
+  if (hw <= 0 || s <= 0) return u;
+  const e = hw * (1 - s);
+  if (u <= e) return u / (1 - s);
+  if (u <= hw + B) return hw + (u - e) * B / (B + hw * s);
+  return u;
+}
+function fwd1(u, hw, s, B) {
+  if (hw <= 0 || s <= 0) return u;
+  if (u <= hw) return u * (1 - s);
+  if (u <= hw + B) return hw * (1 - s) + (u - hw) * (B + hw * s) / B;
+  return u;
+}
+function bodyReshape(src, pose, seg, p) {
+  if (!pose || (!p.slim && !p.waist)) return src;
+  const W = src.width, H = src.height, P = bodyProfile(pose, W, H, seg), { b, torso, kn, an } = P;
+  const sS = new Float32Array(H), sW = new Float32Array(H);
+  const yTop = b.sh.y - torso * .08, yFull = b.sh.y + torso * .25, yEnd = (b.kneeOk ? kn.y : b.hp.y + torso * .9) + (an.y - kn.y) * .5, yFade = Math.max(yEnd - torso * .5, yFull);
+  const waistY = b.hp.y - torso * .3, sig = torso * .2;
+  for (let y = 0; y < H; y++) {
+    if (p.slim) sS[y] = .12 * p.slim * smoothstep(yTop, yFull, y) * (1 - smoothstep(yFade, yEnd, y));
+    if (p.waist) sW[y] = .2 * p.waist * Math.exp(-((y - waistY) ** 2) / (2 * sig * sig));
+  }
+  const B = Math.max(b.shW * .8, 8);
+  const sid = getData(src), sd = sid.data, out = new ImageData(new Uint8ClampedArray(sd), W, H), od = out.data;
+  for (let y = 0; y < H; y++) {
+    const s1 = sS[y], s2 = sW[y]; if (s1 < 1e-4 && s2 < 1e-4) continue;
+    const c = P.cx[y], ro = y * W * 4;
+    // 腰的邊界在瘦身之後的位置
+    const wl = fwd1(P.iL[y], P.oL[y], s1, B), wr = fwd1(P.iR[y], P.oR[y], s1, B);
+    for (let x = 0; x < W; x++) {
+      const left = x < c, u0 = left ? c - x : x - c;
+      let u = s2 > 1e-4 ? inv1(u0, left ? wl : wr, s2, B * .7) : u0;
+      if (s1 > 1e-4) u = inv1(u, left ? P.oL[y] : P.oR[y], s1, B);
+      if (Math.abs(u - u0) < .02) continue;
+      const fx = clamp(left ? c - u : c + u, 0, W - 1.001), ix = fx | 0, t = fx - ix, i0 = ro + ix * 4, o = ro + x * 4;
+      od[o] = sd[i0] * (1 - t) + sd[i0 + 4] * t; od[o + 1] = sd[i0 + 1] * (1 - t) + sd[i0 + 5] * t; od[o + 2] = sd[i0 + 2] * (1 - t) + sd[i0 + 6] * t; od[o + 3] = sd[i0 + 3] * (1 - t) + sd[i0 + 7] * t;
+    }
+  }
+  return putData(out);
 }
 function stretchLegs(src, startY, amt) {
   if (amt <= 0) return src;
@@ -1051,10 +1144,56 @@ async function mkLM(Cls, path, extra) {
 async function getFaces(task, img = S.img) {
   if (S.faces && S.faces.src === img) return S.faces.list;
   await mpLoad(task); task?.check();
-  if (!faceLM) { task?.status('下載臉部模型（約 4 MB，只需一次）…'); faceLM = await mkLM(MP.FaceLandmarker, FACE_TASK, { numFaces: 6 }); }
+  if (!faceLM) { task?.status('下載臉部模型（約 4 MB，只需一次）…'); faceLM = await mkLM(MP.FaceLandmarker, FACE_TASK, { numFaces: 6, minFaceDetectionConfidence: .3, minFacePresenceConfidence: .3 }); }
   task?.status('辨識臉部…'); await sleep(20);
-  const r = faceLM.detect(fitInto(img, 1280));
-  S.faces = { src: img, list: r.faceLandmarks || [] }; return S.faces.list;
+  const list = await detectFacesMulti(img, task);
+  S.faces = { src: img, list }; return list;
+}
+// 把裁切區塊裡的臉部座標換回整張照片的座標
+function lmFromCrop(lms, rx, ry, rw, rh, W, H) { return lms.map(p => ({ x: (rx + p.x * rw) / W, y: (ry + p.y * rh) / H, z: (p.z || 0) * rw / W })); }
+function faceBox(f, W, H) { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; f.forEach(p => { const x = p.x * W, y = p.y * H; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }); return { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 }; }
+function cropCanvas(img, rx, ry, rw, rh, maxSide, minSide = 0) {
+  let k = maxSide / Math.max(rw, rh); if (minSide) k = Math.max(k, Math.min(minSide / Math.max(rw, rh), 3)); k = Math.min(k, 3);
+  const c = mkCanvas(rw * k, rh * k), x = c.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(img, rx, ry, rw, rh, 0, 0, c.width, c.height); return c;
+}
+function detectIn(img, rx, ry, rw, rh, maxSide, minSide) {
+  const W = img.width, H = img.height;
+  const r = faceLM.detect(cropCanvas(img, rx, ry, rw, rh, maxSide, minSide));
+  return (r.faceLandmarks || []).map(f => lmFromCrop(f, rx, ry, rw, rh, W, H));
+}
+// 多尺度找臉：先找整張；找不到就切成重疊的小區塊放大再找（半身照、合照、遠景人像）；最後把每張臉裁切放大重新定位，讓五官位置更準
+async function detectFacesMulti(img, task) {
+  const W = img.width, H = img.height, M = Math.max(W, H), m = Math.min(W, H);
+  let faces = detectIn(img, 0, 0, W, H, 1280);
+  const add = list => list.forEach(f => {
+    const b = faceBox(f, W, H);
+    if (b.w < 12 || b.h < 12) return;
+    if (!faces.some(g => { const a = faceBox(g, W, H); return Math.hypot(a.cx - b.cx, a.cy - b.cy) < Math.max(a.w, b.w) * .5; })) faces.push(f);
+  });
+  if (!faces.length) {
+    task?.status('放大照片細部搜尋臉部…');
+    for (const frac of [.6, .36]) {
+      const t = m * frac, st = t * .62, nx = Math.max(1, Math.ceil((W - t) / st) + 1), ny = Math.max(1, Math.ceil((H - t) / st) + 1);
+      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        const rx = nx === 1 ? (W - t) / 2 : (W - t) * i / (nx - 1), ry = ny === 1 ? (H - t) / 2 : (H - t) * j / (ny - 1);
+        add(detectIn(img, Math.max(0, rx), Math.max(0, ry), Math.min(t, W), Math.min(t, H), 640, 384));
+        await sleep(0); task?.check();
+      }
+      if (faces.length) break;
+    }
+  }
+  // 精修：臉在原圖裡如果不夠大，就裁切放大重新辨識一次
+  const out = [];
+  for (const f of faces) {
+    const b = faceBox(f, W, H), side = Math.max(b.w, b.h) * 2;
+    if (side > M * .75) { out.push(f); continue; }
+    const rx = clamp(b.cx - side / 2, 0, Math.max(0, W - side)), ry = clamp(b.cy - side / 2, 0, Math.max(0, H - side)), rw = Math.min(side, W), rh = Math.min(side, H);
+    let best = null, bd = 1e9;
+    try { detectIn(img, rx, ry, rw, rh, 768, 512).forEach(g => { const a = faceBox(g, W, H), d = Math.hypot(a.cx - b.cx, a.cy - b.cy); if (d < bd && a.w > b.w * .6 && a.w < b.w * 1.6) { bd = d; best = g; } }); } catch (e) { console.warn(e); }
+    out.push(best && bd < b.w * .35 ? best : f);
+    await sleep(0); task?.check();
+  }
+  return out;
 }
 async function getPose(task) {
   if (S.pose && S.pose.src === S.img) return S.pose.lm;
@@ -1063,6 +1202,89 @@ async function getPose(task) {
   task?.status('辨識身體…'); await sleep(20);
   const r = poseLM.detect(fitInto(S.img, 1024));
   S.pose = { src: S.img, lm: (r.landmarks && r.landmarks[0]) || null }; return S.pose.lm;
+}
+/* ---------- 人像分割：皮膚、身形（MediaPipe 多類別人像分割） ---------- */
+// 類別：0 背景、1 頭髮、2 身體皮膚、3 臉部皮膚、4 衣服、5 配件
+const SEG_TASK = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite';
+let segLM = null, SEG = null;
+function lumaF(c) { const d = getData(c).data, n = c.width * c.height, a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = (.299 * d[i * 4] + .587 * d[i * 4 + 1] + .114 * d[i * 4 + 2]) / 255; return a; }
+// 引導濾波：讓低解析度的遮罩貼齊照片裡真正的邊緣
+function guidedF(I, p, w, h, r, eps) {
+  const n = w * h, Ip = new Float32Array(n), II = new Float32Array(n);
+  for (let i = 0; i < n; i++) { Ip[i] = I[i] * p[i]; II[i] = I[i] * I[i]; }
+  const mI = blurF(I, w, h, r, 1), mP = blurF(p, w, h, r, 1), mIp = blurF(Ip, w, h, r, 1), mII = blurF(II, w, h, r, 1);
+  const A = new Float32Array(n), B = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const v = mII[i] - mI[i] * mI[i], a = (mIp[i] - mI[i] * mP[i]) / (v + eps); A[i] = a; B[i] = mP[i] - a * mI[i]; }
+  const mA = blurF(A, w, h, r, 1), mB = blurF(B, w, h, r, 1), q = new Float32Array(n);
+  for (let i = 0; i < n; i++) q[i] = clamp(mA[i] * I[i] + mB[i], 0, 1);
+  return q;
+}
+// 雙線性縮放 Float32 遮罩
+function resampleF(a, w, h, W, H) {
+  if (w === W && h === H) return a;
+  const o = new Float32Array(W * H), sx = w / W, sy = h / H;
+  for (let y = 0; y < H; y++) {
+    const fy = clamp((y + .5) * sy - .5, 0, h - 1), y0 = fy | 0, y1 = Math.min(h - 1, y0 + 1), ty = fy - y0, r0 = y0 * w, r1 = y1 * w, ro = y * W;
+    for (let x = 0; x < W; x++) {
+      const fx = clamp((x + .5) * sx - .5, 0, w - 1), x0 = fx | 0, x1 = Math.min(w - 1, x0 + 1), tx = fx - x0;
+      o[ro + x] = (a[r0 + x0] * (1 - tx) + a[r0 + x1] * tx) * (1 - ty) + (a[r1 + x0] * (1 - tx) + a[r1 + x1] * tx) * ty;
+    }
+  }
+  return o;
+}
+function segRun(c) {
+  const r = segLM.segment(c);
+  try {
+    const ms = r.confidenceMasks, mw = ms[0].width, mh = ms[0].height, n = mw * mh;
+    const bg = ms[0].getAsFloat32Array(), b = ms[2].getAsFloat32Array(), f = ms[3].getAsFloat32Array();
+    const person = new Float32Array(n), skin = new Float32Array(n);
+    for (let i = 0; i < n; i++) { person[i] = 1 - bg[i]; skin[i] = Math.min(1, b[i] + f[i]); }
+    return { person: resampleF(person, mw, mh, c.width, c.height), skin: resampleF(skin, mw, mh, c.width, c.height) };
+  } finally { r.close?.(); }
+}
+async function getSeg(task, img = S.img) {
+  if (SEG && SEG.src === img) return SEG;
+  await mpLoad(task); task?.check();
+  if (!segLM) { task?.status('下載人像分割模型（約 16 MB，只需一次）…'); segLM = await mkLM(MP.ImageSegmenter, SEG_TASK, { outputConfidenceMasks: true, outputCategoryMask: false }); }
+  task?.status('分析皮膚與身形…'); await sleep(20);
+  const c = fitInto(img, 1024), w = c.width, h = c.height, I = lumaF(c), r = segRun(c), rad = Math.max(2, Math.round(Math.max(w, h) / 160));
+  SEG = { src: img, w, h, person: guidedF(I, r.person, w, h, rad, 2e-3), skin: guidedF(I, r.skin, w, h, rad, 2e-3), skinF: null, facesDone: null, up: null };
+  return SEG;
+}
+// 皮膚遮罩：整張分割 ＋ 每張臉裁切放大後再分割一次（小臉也準），並挖掉眼睛、眉毛、嘴唇
+async function getSkin(task, img, faces) {
+  const seg = await getSeg(task, img);
+  if (seg.skinF && seg.facesDone === faces) return seg;
+  const { w, h } = seg, sk = new Float32Array(seg.skin), W = img.width, H = img.height, kx = w / W;
+  for (const f of faces || []) {
+    const b = faceBox(f, W, H), side = Math.max(b.w, b.h) * 1.9;
+    if (side * kx > Math.max(w, h) * .7) continue; // 臉已經夠大，整張分割就夠準
+    const rx = clamp(b.cx - side / 2, 0, Math.max(0, W - side)), ry = clamp(b.cy - side / 2, 0, Math.max(0, H - side)), rw = Math.min(side, W), rh = Math.min(side, H);
+    const cc = cropCanvas(img, rx, ry, rw, rh, 512), cw = cc.width, ch = cc.height;
+    const cr = segRun(cc), cs = guidedF(lumaF(cc), cr.skin, cw, ch, Math.max(2, Math.round(cw / 128)), 2e-3);
+    const sx0 = rx * kx, sy0 = ry * kx, sw = rw * kx, sh = rh * kx;
+    for (let y = Math.max(0, Math.floor(sy0)); y < Math.min(h, Math.ceil(sy0 + sh)); y++) for (let x = Math.max(0, Math.floor(sx0)); x < Math.min(w, Math.ceil(sx0 + sw)); x++) {
+      const u = (x + .5 - sx0) / sw, v = (y + .5 - sy0) / sh; if (u < 0 || v < 0 || u > 1 || v > 1) continue;
+      const t = smoothstep(0, .15, Math.min(u, v, 1 - u, 1 - v)); if (t <= 0) continue;
+      const px = clamp(Math.round(u * cw - .5), 0, cw - 1), py = clamp(Math.round(v * ch - .5), 0, ch - 1), i = y * w + x;
+      sk[i] = sk[i] * (1 - t) + cs[py * cw + px] * t;
+    }
+    await sleep(0); task?.check();
+  }
+  if (faces && faces.length) {
+    const ex = mkCanvas(w, h), x = ex.getContext('2d'); x.fillStyle = '#fff'; x.strokeStyle = '#fff'; x.lineJoin = 'round'; let fw = 0;
+    faces.forEach(f => { const g = fInfo(f, w, h).w; fw = Math.max(fw, g); [EYE_R, EYE_L, BROW_R, BROW_L, LIPS_OUT].forEach(idx => { x.beginPath(); pathPts(x, pts(f, idx, w, h)); x.lineWidth = g * .035; x.fill(); x.stroke(); }); });
+    featherAlpha(ex, Math.max(1, fw / 45)); const ea = maskAlpha(ex);
+    for (let i = 0; i < sk.length; i++) sk[i] *= 1 - ea[i];
+  }
+  seg.skinF = sk; seg.facesDone = faces; seg.up = null;
+  return seg;
+}
+// 取得與目前處理影像同尺寸的皮膚遮罩（預覽小圖或原尺寸）；沒有分割結果時回傳 null
+function skinAt(W, H) {
+  if (!SEG || SEG.src !== S.img || !SEG.skinF) return null;
+  if (SEG.up && SEG.up.W === W && SEG.up.H === H) return SEG.up.a;
+  const a = resampleF(SEG.skinF, SEG.w, SEG.h, W, H); SEG.up = { W, H, a }; return a;
 }
 /* ========== 編輯器框架 ========== */
 const TOOLS = {};
@@ -1796,26 +2018,33 @@ TOOLS.upscale = {
   close() { UP.result = null; },
 };
 /* ========== 人像美容 ========== */
-async function needFaces(optional) {
-  const faces = await runTask('辨識臉部', task => getFaces(task));
+async function needFaces(optional, { skin = false } = {}) {
+  const faces = await runTask('辨識臉部', async task => {
+    const f = await getFaces(task); task.check();
+    if (skin) { try { await getSkin(task, S.img, f); } catch (e) { if (e instanceof CancelError) throw e; console.warn('皮膚分割失敗，改用膚色判斷', e); } }
+    return f;
+  });
   if (faces === undefined) return false;
-  if (!faces.length) { if (optional) { toast('沒有找到臉，會套用在整張照片的膚色上'); return []; } toast('找不到臉，請換一張正面、清楚的照片', 'err'); return false; }
+  if (!faces.length) {
+    if (optional) { toast(skin && SEG && SEG.src === S.img && SEG.skinF ? '沒有找到臉，會套用在辨識到的皮膚上' : '沒有找到臉，會套用在整張照片的膚色上'); return []; }
+    toast('找不到臉。臉太小、太側面或被遮住都可能找不到，可以先裁切放大人物再試', 'err'); return false;
+  }
   return faces;
 }
 // 單一滑桿的美顏工具
-function beautyTool(name, def, fn, { optional = false, note = '' } = {}) {
+function beautyTool(name, def, fn, { optional = false, note = '', skin = false } = {}) {
   const st = { v: def };
   return {
     name, heavy: true,
-    async init() { st.v = def; const f = await needFaces(optional); if (f === false) return false; st.faces = f; refreshUI(); this.pv(); },
+    async init() { st.v = def; const f = await needFaces(optional, { skin }); if (f === false) return false; st.faces = f; refreshUI(); this.pv(); },
     ui() { return sl('bV', '程度', 0, 100, st.v) + (note ? `<p class="note">${note}</p>` : ''); },
     bind(r) { $('#bV', r).addEventListener('input', e => { st.v = +e.target.value; this.pv(); }); },
     pv() { schedulePreview(() => procProxy((id) => fn(id, st.faces || [], st.v / 100))); },
     async apply(task) { if (!st.v) return null; task.status('處理原尺寸照片…'); await sleep(30); return putData(fn(getData(S.img), st.faces || [], st.v / 100)); },
   };
 }
-TOOLS.smooth = beautyTool('磨皮', 55, bSmooth, { optional: true });
-TOOLS.whiten = beautyTool('美白', 40, bWhiten, { optional: true });
+TOOLS.smooth = beautyTool('磨皮', 55, bSmooth, { optional: true, skin: true });
+TOOLS.whiten = beautyTool('美白', 40, bWhiten, { optional: true, skin: true });
 TOOLS.dark = beautyTool('黑眼圈', 60, bDarkCircle);
 TOOLS.eyes2 = beautyTool('亮眼', 55, bBrightEyes);
 TOOLS.teeth = beautyTool('白牙', 60, bTeeth, { note: '要有露出牙齒的笑容才看得出效果。' });
@@ -1830,7 +2059,7 @@ function autoBeauty(src, faces, style, k) {
 }
 TOOLS.auto = {
   name: '一鍵美顏', heavy: true,
-  async init() { AU.style = 'clear'; AU.k = 70; const f = await needFaces(true); if (f === false) return false; AU.faces = f; refreshUI(); this.pv(); },
+  async init() { AU.style = 'clear'; AU.k = 70; const f = await needFaces(true, { skin: true }); if (f === false) return false; AU.faces = f; refreshUI(); this.pv(); },
   ui() { return chips(AU_STYLES.map(s => [s[0], s[1]]), AU.style, 'as') + sl('auK', '程度', 0, 100, AU.k); },
   bind(r) { on(r, '[data-as]', b => { AU.style = b.dataset.as; refreshUI(); this.pv(); }); $('#auK', r).addEventListener('input', e => { AU.k = +e.target.value; this.pv(); }); },
   pv() { schedulePreview(() => asPreview(autoBeauty(proxy(), AU.faces, AU.style, AU.k / 100), pk())); },
@@ -1890,7 +2119,7 @@ TOOLS.makeup = {
 const BD = { k: 'slim', v: {} };
 function bodyRun(src, pose) {
   const W = src.width, H = src.height; let out = src;
-  if (pose && (BD.v.slim || BD.v.waist)) out = applyWarps(out, bodyWarps(pose, W, H, { slim: (BD.v.slim || 0) / 100, waist: (BD.v.waist || 0) / 100 }));
+  if (pose && (BD.v.slim || BD.v.waist)) out = bodyReshape(out, pose, BD.seg, { slim: (BD.v.slim || 0) / 100, waist: (BD.v.waist || 0) / 100 });
   if (BD.v.tall) { const y0 = pose ? poseInfo(pose, W, H).hp.y - H * .02 : H * .55; out = stretchLegs(out, y0, BD.v.tall / 100); }
   return out;
 }
@@ -1898,11 +2127,12 @@ TOOLS.body = {
   name: '身材', heavy: true,
   async init(param) {
     BD.v = {}; BD.k = param || 'slim';
-    const pose = await runTask('辨識身體', t => getPose(t)); if (pose === undefined) return false;
-    BD.pose = pose; if (!pose) { if (BD.k !== 'tall') { toast('找不到完整的人，瘦身和瘦腰需要拍到上半身到大腿', 'err'); return false; } toast('找不到人，增高會從畫面中間偏下開始拉長'); }
+    const r = await runTask('辨識身體', async t => { const pose = await getPose(t); let seg = null; if (pose) { try { seg = await getSeg(t, S.img); } catch (e) { if (e instanceof CancelError) throw e; console.warn('人像分割失敗，改用骨架估計', e); } } return { pose, seg }; });
+    if (r === undefined) return false; const pose = r.pose;
+    BD.pose = pose; BD.seg = r.seg; if (!pose) { if (BD.k !== 'tall') { toast('找不到完整的人，瘦身和瘦腰需要拍到上半身到大腿', 'err'); return false; } toast('找不到人，增高會從畫面中間偏下開始拉長'); }
     refreshUI();
   },
-  ui() { const L = [['slim', '瘦身'], ['waist', '瘦腰'], ['tall', '增高']]; return chips(L.map(([k, l]) => [k, l + (BD.v[k] ? '•' : '')]), BD.k, 'bk') + sl('bdV', L.find(x => x[0] === BD.k)[1], 0, 100, BD.v[BD.k] || 0) + '<p class="note">背景有直線（門框、地板）時拉太多會變形，建議適量。</p>'; },
+  ui() { const L = [['slim', '瘦身'], ['waist', '瘦腰'], ['tall', '增高']]; return chips(L.map(([k, l]) => [k, l + (BD.v[k] ? '•' : '')]), BD.k, 'bk') + sl('bdV', L.find(x => x[0] === BD.k)[1], 0, 100, BD.v[BD.k] || 0) + '<p class="note">只會收窄身體輪廓，地板、桌面等橫線不會彎。身體旁邊的直立門框拉太多會稍微彎，建議適量。</p>'; },
   bind(r) { on(r, '[data-bk]', b => { BD.k = b.dataset.bk; refreshUI(); }); $('#bdV', r).addEventListener('input', e => { if (BD.k !== 'tall' && !BD.pose) return; BD.v[BD.k] = +e.target.value; schedulePreview(() => asPreview(bodyRun(proxy(), BD.pose), pk())); }); },
   async apply(task) { if (!Object.values(BD.v).some(v => v)) return null; task.status('處理原尺寸照片…'); await sleep(30); return bodyRun(S.img, BD.pose); },
 };
