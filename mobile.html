@@ -1,0 +1,1694 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="PochiEdit">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<title>PochiEdit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Noto+Serif+TC:wght@700;900&family=LXGW+WenKai+TC:wght@400;700&family=Noto+Serif:ital,wght@0,700;1,700;1,900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f6f4f6; --card:#ffffff; --ink:#221c20; --muted:#8c8189; --line:#ece5ea;
+  --rose:#ff4d8d; --rose-d:#e3346f; --rose-soft:#ffe3ee; --lav:#8f7cff; --lav-soft:#ece8ff;
+  --stage:#ebe7ea; --top:env(safe-area-inset-top,0px); --bot:env(safe-area-inset-bottom,0px);
+  font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  -webkit-tap-highlight-color:transparent;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-size:15px;overflow:hidden;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none;padding:0}
+input,textarea{-webkit-user-select:text;user-select:text}
+:focus-visible{outline:2px solid var(--rose);outline-offset:2px}
+.logo{font-family:"Noto Serif",Georgia,"Times New Roman",serif;font-style:italic;font-weight:900;letter-spacing:.01em}
+.screen{position:fixed;inset:0;display:none;flex-direction:column;padding-top:var(--top);background:var(--bg)}
+.screen.on{display:flex}
+
+/* 首頁 */
+#home{overflow-y:auto;padding:calc(var(--top) + 8px) 18px calc(var(--bot) + 24px)}
+.h-top{display:flex;align-items:center;justify-content:space-between;padding:10px 2px 18px}
+.h-top .logo{font-size:30px}
+.h-top a{font-size:12px;color:var(--muted);text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:5px 11px;background:var(--card)}
+.hero{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.big{border-radius:22px;padding:18px 16px 16px;text-align:left;min-height:150px;display:flex;flex-direction:column;justify-content:flex-end;gap:4px;color:#fff;position:relative;overflow:hidden}
+.big svg{position:absolute;right:12px;top:12px;width:44px;height:44px;opacity:.9}
+.big b{font-size:21px;font-weight:900}
+.big span{font-size:12px;opacity:.9;line-height:1.5}
+.big.b1{background:linear-gradient(150deg,#ff7aa8,#ff4d8d 55%,#f0306f)}
+.big.b2{background:linear-gradient(150deg,#b2a3ff,#8f7cff 55%,#6f5cf0)}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px;background:var(--card);border-radius:22px;padding:14px 8px}
+.gi{display:flex;flex-direction:column;align-items:center;gap:7px;padding:8px 0;font-size:12.5px;color:var(--ink)}
+.gi i{width:46px;height:46px;border-radius:15px;display:grid;place-items:center;background:var(--rose-soft);color:var(--rose-d)}
+.gi:nth-child(even) i{background:var(--lav-soft);color:#5f4ce0}
+.gi svg{width:24px;height:24px}
+.foot{text-align:center;color:var(--muted);font-size:12px;line-height:1.7;margin:22px 0 0}
+
+/* 編輯器 */
+.e-top{display:flex;align-items:center;justify-content:space-between;height:52px;padding:0 10px;background:var(--card);flex:none}
+.e-top .mid{display:flex;gap:4px}
+.ib{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:var(--ink)}
+.ib:disabled{opacity:.3}
+.ib svg{width:22px;height:22px}
+.pill{background:var(--rose);color:#fff;font-weight:700;border-radius:999px;padding:8px 18px;font-size:14px}
+.pill.ghost{background:var(--rose-soft);color:var(--rose-d)}
+.stage{position:relative;flex:1;min-height:0;background:var(--stage);overflow:hidden;touch-action:none}
+.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.cmp{position:absolute;right:12px;bottom:12px;width:44px;height:44px;border-radius:50%;background:#fffffff0;box-shadow:0 2px 10px #0002;display:grid;place-items:center}
+.cmp svg{width:22px;height:22px}
+.cmp:active{background:var(--rose);color:#fff}
+.hint{position:absolute;left:50%;top:12px;transform:translateX(-50%);background:#000a;color:#fff;font-size:12px;padding:5px 12px;border-radius:999px;pointer-events:none;white-space:nowrap}
+.panel{background:var(--card);flex:none;padding-bottom:var(--bot);border-top-left-radius:18px;border-top-right-radius:18px;margin-top:-14px;position:relative;z-index:2;box-shadow:0 -4px 18px #0000000d}
+.seg2{display:flex;justify-content:center;gap:22px;padding:12px 0 2px}
+.seg2 button{font-size:14px;color:var(--muted);padding:4px 2px;position:relative}
+.seg2 button.on{color:var(--ink);font-weight:700}
+.seg2 button.on::after{content:"";position:absolute;left:50%;bottom:-4px;width:16px;height:3px;border-radius:2px;background:var(--rose);transform:translateX(-50%)}
+.tabs{display:flex;gap:2px;overflow-x:auto;padding:10px 8px 12px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:none;width:66px;display:flex;flex-direction:column;align-items:center;gap:6px;font-size:12px;color:var(--ink)}
+.tab i{width:44px;height:44px;border-radius:14px;background:var(--bg);display:grid;place-items:center}
+.tab svg{width:23px;height:23px}
+.opts{padding:12px 14px 4px;max-height:42vh;overflow-y:auto}
+.tbar{display:flex;align-items:center;justify-content:space-between;padding:4px 10px 8px;border-top:1px solid var(--line)}
+.tbar span{font-weight:700;font-size:14px}
+.tbar .ib svg{width:24px;height:24px}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 8px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;padding:7px 14px;border-radius:999px;background:var(--bg);font-size:13px;color:var(--ink);white-space:nowrap}
+.chip.on{background:var(--rose);color:#fff;font-weight:700}
+.sl{display:flex;align-items:center;gap:10px;padding:6px 2px}
+.sl label{flex:none;font-size:13px;color:var(--muted);min-width:44px}
+.sl input{flex:1;min-width:0;accent-color:var(--rose);height:28px}
+.sl output{width:34px;text-align:right;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.sw{flex:none;width:32px;height:32px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px var(--line)}
+.sw.on{box-shadow:0 0 0 2px var(--rose)}
+.sw.trans{background:conic-gradient(#ccc 25%,#fff 0 50%,#ccc 0 75%,#fff 0) 0 0/12px 12px}
+.thumbs{display:flex;gap:10px;overflow-x:auto;padding:2px 0 8px;scrollbar-width:none}
+.thumbs::-webkit-scrollbar{display:none}
+.th{flex:none;width:64px;display:flex;flex-direction:column;align-items:center;gap:5px;font-size:12px}
+.th canvas,.th .ph{width:64px;height:64px;border-radius:12px;border:2px solid transparent;display:block;background:var(--bg)}
+.th.on canvas,.th.on .ph{border-color:var(--rose)}
+.th.on{color:var(--rose-d);font-weight:700}
+.emo{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;max-height:170px;overflow-y:auto}
+.emo button{font-size:26px;height:42px;border-radius:10px;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
+.emo button:active{background:var(--bg)}
+.row{display:flex;gap:8px;align-items:center;padding:4px 0}
+.btn{flex:1;padding:11px 12px;border-radius:14px;background:var(--bg);font-size:14px;text-align:center;font-weight:500}
+.btn.main{background:var(--rose);color:#fff;font-weight:700}
+.btn:disabled{opacity:.4}
+.note{color:var(--muted);font-size:12px;line-height:1.6;margin:6px 0}
+textarea.tx{width:100%;border:1px solid var(--line);border-radius:12px;padding:10px;resize:none;background:var(--bg);font-size:16px}
+.tstyles{display:flex;gap:8px;overflow-x:auto;padding:2px 0 8px;scrollbar-width:none}
+.tstyles button{flex:none;width:68px;height:44px;border-radius:12px;background:#3b3540;border:2px solid transparent;display:grid;place-items:center}
+.tstyles button.on{border-color:var(--rose)}
+.tstyles canvas{width:60px;height:28px}
+.sub-top{display:flex;align-items:center;justify-content:space-between;height:52px;padding:0 10px;background:var(--card);flex:none}
+.sub-top b{font-size:16px}
+.sub-opts{background:var(--card);padding:12px 14px calc(var(--bot) + 12px);max-height:46vh;overflow-y:auto;flex:none}
+.fields input{width:100%;border:1px solid var(--line);border-radius:12px;padding:9px 11px;background:var(--bg);font-size:16px;margin:4px 0}
+
+#busy{position:fixed;inset:0;background:#1f1a1ecc;display:none;align-items:center;justify-content:center;z-index:50;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+#busy .in{width:min(300px,82%);text-align:center;color:#fff}
+.ring{width:84px;height:84px;margin:0 auto 14px;border-radius:50%;background:conic-gradient(var(--rose) calc(var(--p,0)*1%),#ffffff26 0);display:grid;place-items:center}
+.ring span{width:70px;height:70px;border-radius:50%;background:#2a2428;display:grid;place-items:center;font-weight:700;font-variant-numeric:tabular-nums}
+.ring.indet{background:conic-gradient(var(--rose) 0 25%,#ffffff26 0);animation:spin 1s linear infinite}
+.ring.indet span{animation:spin 1s linear infinite reverse}
+@keyframes spin{to{transform:rotate(360deg)}}
+#busy h4{margin:0 0 6px;font-size:17px}
+#busy p{margin:0 0 4px;font-size:12.5px;opacity:.8;line-height:1.6;min-height:18px}
+#busy button{margin-top:14px;padding:9px 26px;border-radius:999px;background:#ffffff22;color:#fff}
+#toast{position:fixed;left:50%;bottom:calc(var(--bot) + 120px);transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;align-items:center;z-index:60;pointer-events:none;width:90%}
+#toast div{background:#221c20ee;color:#fff;padding:9px 16px;border-radius:999px;font-size:13px;text-align:center;max-width:100%}
+#toast div.err{background:#c02a5aee;border-radius:14px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+@media (min-width:700px){#home{padding-left:calc(50% - 320px);padding-right:calc(50% - 320px)}}
+</style>
+</head>
+<body>
+<div id="home" class="screen on">
+  <header class="h-top"><div class="logo">PochiEdit</div><a href="index.html?desktop=1">電腦版</a></header>
+  <section class="hero">
+    <button class="big b1" data-go="edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L6 20"/></svg><b>美化圖片</b><span>裁剪、濾鏡、文字<br>貼紙、邊框、消除</span></button>
+    <button class="big b2" data-go="beauty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="5"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/><path d="M19 3l.8 1.7L21.5 5.5l-1.7.8L19 8l-.8-1.7L16.5 5.5l1.7-.8z"/></svg><b>人像美容</b><span>磨皮、瘦臉、大眼<br>美妝、瘦身、增高</span></button>
+  </section>
+  <section class="grid" id="homeGrid"></section>
+  <p class="foot">照片只在你的手機裡處理，不會上傳。<br>免費、沒有廣告。</p>
+</div>
+
+<div id="editor" class="screen">
+  <header class="e-top">
+    <button class="ib" id="eBack" aria-label="回首頁"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 5-7 7 7 7"/></svg></button>
+    <div class="mid">
+      <button class="ib" id="eUndo" aria-label="復原" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
+      <button class="ib" id="eRedo" aria-label="重做" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg></button>
+    </div>
+    <button class="pill" id="eSave">儲存</button>
+  </header>
+  <div class="stage" id="eStage">
+    <canvas id="ev"></canvas>
+    <button class="cmp" id="eCmp" aria-label="按住看原圖"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M12 4v16"/></svg></button>
+    <div class="hint" id="eHint" hidden></div>
+  </div>
+  <div class="panel">
+    <div id="eTool" hidden>
+      <div class="opts" id="eOpts"></div>
+      <div class="tbar"><button class="ib" id="tX" aria-label="取消"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button><span id="tName"></span><button class="ib" id="tOK" aria-label="套用"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg></button></div>
+    </div>
+    <div id="eMain">
+      <div class="seg2"><button data-grp="edit" class="on">美化</button><button data-grp="beauty">人像美容</button></div>
+      <div class="tabs" id="eTabs"></div>
+    </div>
+  </div>
+</div>
+
+<div id="sub" class="screen">
+  <header class="sub-top">
+    <button class="ib" id="sBack" aria-label="返回"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 5-7 7 7 7"/></svg></button>
+    <b id="sTitle"></b>
+    <button class="pill" id="sNext">下一步</button>
+  </header>
+  <div class="stage" id="sStage"><canvas id="sv"></canvas></div>
+  <div class="sub-opts" id="sOpts"></div>
+</div>
+
+<div id="busy" role="alertdialog" aria-live="polite"><div class="in">
+  <div class="ring" id="bRing"><span id="bPct"></span></div>
+  <h4 id="bTitle">處理中</h4><p id="bMsg"></p><p id="bEta"></p>
+  <button id="bCancel">取消</button>
+</div></div>
+<div id="toast"></div>
+<input type="file" id="fImg" accept="image/*" hidden>
+<input type="file" id="fMulti" accept="image/*" multiple hidden>
+<input type="file" id="fBg" accept="image/*" hidden>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webgpu.min.js"></script>
+<script>
+'use strict';
+/* ========== 基本工具 ========== */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+function mkCanvas(w, h) { const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; }
+function c2d(c) { return c.getContext('2d', { willReadFrequently: true }); }
+function cloneCanvas(src) { const c = mkCanvas(src.width, src.height); c.getContext('2d').drawImage(src, 0, 0); return c; }
+function getData(c) { return c2d(c).getImageData(0, 0, c.width, c.height); }
+function putData(id) { const c = mkCanvas(id.width, id.height); c2d(c).putImageData(id, 0, 0); return c; }
+function resizeCanvas(src, w, h) {
+  let cur = src, cw = src.width, ch = src.height;
+  while (cw / 2 >= w * 1.0001 && ch / 2 >= h * 1.0001) { cw = Math.round(cw / 2); ch = Math.round(ch / 2); const t = mkCanvas(cw, ch), x = t.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(cur, 0, 0, cw, ch); cur = t; }
+  const out = mkCanvas(w, h), o = out.getContext('2d'); o.imageSmoothingQuality = 'high'; o.drawImage(cur, 0, 0, w, h); return out;
+}
+function fitInto(src, maxSide) { const k = Math.min(1, maxSide / Math.max(src.width, src.height)); return k < 1 ? resizeCanvas(src, Math.round(src.width * k), Math.round(src.height * k)) : src; }
+function hasAlpha(c) { const d = getData(c).data; for (let i = 3; i < d.length; i += 4 * 11) if (d[i] < 250) return true; return false; }
+function toast(msg, type = '') { const el = document.createElement('div'); el.textContent = msg; if (type) el.className = type; $('#toast').appendChild(el); setTimeout(() => el.remove(), type === 'err' ? 5500 : 2600); }
+function stamp() { const d = new Date(), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`; }
+function fmtEta(sec) { if (!isFinite(sec) || sec <= 0) return ''; sec = Math.round(sec); return sec < 60 ? `剩約 ${sec} 秒` : `剩約 ${Math.floor(sec / 60)} 分 ${sec % 60} 秒`; }
+const IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const MAX_SIDE = 3072, MAX_AREA = 16e6;
+
+/* ========== 畫面切換 ========== */
+function show(id) { $$('.screen').forEach(s => s.classList.toggle('on', s.id === id)); if (id === 'editor') { resizeEV(); fitView(); } if (id === 'sub') SUB.resize?.(); }
+
+/* ========== 工作進度 ========== */
+class CancelError extends Error { constructor() { super('cancelled'); this.name = 'CancelError'; } }
+let currentTask = null;
+async function runTask(title, fn) {
+  if (currentTask) { toast('請等目前的處理完成'); return; }
+  const ac = new AbortController(), t0 = performance.now(), ring = $('#bRing');
+  const task = {
+    signal: ac.signal, cancelled: false,
+    check() { if (this.cancelled) throw new CancelError(); },
+    progress(f, msg, eta) { ring.classList.remove('indet'); const p = clamp(Math.round(f * 100), 0, 100); ring.style.setProperty('--p', p); $('#bPct').textContent = p + '%'; if (msg != null) $('#bMsg').textContent = msg; $('#bEta').textContent = eta != null ? eta : (f > .03 ? fmtEta((performance.now() - t0) / 1000 * (1 - f) / f) : ''); },
+    status(msg) { ring.classList.add('indet'); $('#bPct').textContent = ''; $('#bMsg').textContent = msg; $('#bEta').textContent = ''; },
+  };
+  currentTask = task; $('#bTitle').textContent = title; task.status('準備中…');
+  const cb = $('#bCancel'); cb.disabled = false; cb.textContent = '取消';
+  cb.onclick = () => { task.cancelled = true; ac.abort(); cb.disabled = true; cb.textContent = '正在取消…'; };
+  $('#busy').style.display = 'flex';
+  await sleep(30);
+  try { return await fn(task); }
+  catch (e) {
+    if (e instanceof CancelError || e.name === 'AbortError' || task.cancelled) toast('已取消，照片維持原樣');
+    else { console.error(e); toast(friendlyError(e), 'err'); }
+    return undefined;
+  } finally { $('#busy').style.display = 'none'; currentTask = null; }
+}
+function friendlyError(e) {
+  const m = String(e?.message || e);
+  if (/Failed to fetch|NetworkError|Load failed|network/i.test(m)) return '下載失敗：請確認網路連線後再試一次';
+  if (/memory|OOM|allocation|Failed to allocate/i.test(m)) return '手機記憶體不足：請換小一點的照片或選較小的倍率';
+  return '處理失敗：' + m.slice(0, 120);
+}
+
+/* ========== 文件狀態與歷史 ========== */
+const S = { img: null, orig: null, hist: [], fut: [], preview: null, tool: null, grp: 'edit', hold: false, view: { s: 1, x: 0, y: 0 }, faces: null, pose: null, proxy: null, proxySrc: null };
+function commit(c) {
+  S.hist.push(S.img); if (S.hist.length > 25) S.hist.shift(); S.fut = [];
+  const dims = c.width !== S.img.width || c.height !== S.img.height;
+  S.img = c; S.preview = null; updateTop(); if (dims) fitView(); else render();
+}
+function undo() { if (!S.hist.length || S.tool || currentTask) return; S.fut.push(S.img); S.img = S.hist.pop(); updateTop(); fitView(); }
+function redo() { if (!S.fut.length || S.tool || currentTask) return; S.hist.push(S.img); S.img = S.fut.pop(); updateTop(); fitView(); }
+function updateTop() { $('#eUndo').disabled = !S.hist.length || !!S.tool; $('#eRedo').disabled = !S.fut.length || !!S.tool; }
+function proxy() {
+  if (S.proxySrc !== S.img) { S.proxy = fitInto(S.img, 1080); S.proxySrc = S.img; }
+  return S.proxy;
+}
+function pk() { return S.img.width / proxy().width; }  // 預覽縮放比
+function asPreview(c, k) { c._k = k; return c; }
+async function loadPhoto(file) {
+  const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => createImageBitmap(file));
+  let w = bmp.width, h = bmp.height; const k = Math.min(1, MAX_SIDE / Math.max(w, h));
+  w = Math.round(w * k); h = Math.round(h * k);
+  const c = mkCanvas(w, h), x = c.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(bmp, 0, 0, w, h); bmp.close?.();
+  return c;
+}
+function setDocument(c) { S.orig = S.img = c; S.hist = []; S.fut = []; S.preview = null; S.faces = null; S.pose = null; updateTop(); }
+
+/* ========== 編輯畫布（觸控） ========== */
+const ev = $('#ev'), ectx = ev.getContext('2d');
+let DPR = Math.min(2, window.devicePixelRatio || 1), checker, rafP = false;
+(function () { const c = mkCanvas(16, 16), x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 16, 16); x.fillStyle = '#ddd'; x.fillRect(0, 0, 8, 8); x.fillRect(8, 8, 8, 8); checker = ectx.createPattern(c, 'repeat'); })();
+function resizeEV() { const r = $('#eStage').getBoundingClientRect(); ev.width = Math.max(1, r.width * DPR); ev.height = Math.max(1, r.height * DPR); render(); }
+function shownBase() {
+  if (S.hold) { if (S.tool) return { c: S.img, k: 1 }; return { c: S.orig, k: S.img.width / S.orig.width }; }
+  if (S.preview) return { c: S.preview, k: S.preview._k || 1 };
+  return { c: S.img, k: 1 };
+}
+function fitView() {
+  if (!S.img) return; const r = $('#eStage').getBoundingClientRect(); const b = shownBase();
+  const W = b.c.width * b.k, H = b.c.height * b.k, s = Math.min((r.width - 24) / W, (r.height - 40) / H);
+  S.view = { s, x: (r.width - W * s) / 2, y: (r.height - H * s) / 2 - 6 }; render();
+}
+function render() { if (rafP) return; rafP = true; requestAnimationFrame(() => { rafP = false; draw(); }); }
+function draw() {
+  ectx.setTransform(1, 0, 0, 1, 0, 0); ectx.clearRect(0, 0, ev.width, ev.height);
+  if (!S.img) return;
+  const { s, x, y } = S.view, b = shownBase(), W = b.c.width * b.k, H = b.c.height * b.k;
+  ectx.setTransform(DPR * s, 0, 0, DPR * s, DPR * x, DPR * y);
+  checker.setTransform(new DOMMatrix().scale(1 / s)); ectx.fillStyle = checker; ectx.fillRect(0, 0, W, H);
+  ectx.imageSmoothingQuality = 'high'; ectx.drawImage(b.c, 0, 0, W, H);
+  if (!S.hold && S.tool) TOOLS[S.tool].overlay?.(ectx, s);
+}
+function toImg(cx, cy) { const r = ev.getBoundingClientRect(); return { x: (cx - r.left - S.view.x) / S.view.s, y: (cy - r.top - S.view.y) / S.view.s, sx: cx - r.left, sy: cy - r.top }; }
+const ptrs = new Map(); let gest = null, lastTap = 0;
+ev.addEventListener('pointerdown', e => {
+  if (!S.img || currentTask) return; ev.setPointerCapture(e.pointerId);
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (ptrs.size === 1) {
+    const T = S.tool && TOOLS[S.tool];
+    if (T && T.touch) gest = { type: 'pending', p0: toImg(e.clientX, e.clientY), t: performance.now(), sx: e.clientX, sy: e.clientY };
+    else gest = { type: 'pan', sx: e.clientX, sy: e.clientY, ox: S.view.x, oy: S.view.y, t: performance.now() };
+  } else if (ptrs.size === 2) {
+    if (gest?.type === 'tool') TOOLS[S.tool].up?.(null, true);
+    const [a, b] = [...ptrs.values()], r = ev.getBoundingClientRect();
+    gest = { type: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y), s0: S.view.s, mx: (a.x + b.x) / 2 - r.left, my: (a.y + b.y) / 2 - r.top, ox: S.view.x, oy: S.view.y };
+  }
+});
+ev.addEventListener('pointermove', e => {
+  if (!ptrs.has(e.pointerId)) { if (S.tool && TOOLS[S.tool].hover) { TOOLS[S.tool].hover(toImg(e.clientX, e.clientY)); } return; }
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (!gest) return;
+  if (gest.type === 'pinch' && ptrs.size >= 2) {
+    const [a, b] = [...ptrs.values()], r = ev.getBoundingClientRect();
+    const d = Math.hypot(a.x - b.x, a.y - b.y), s = clamp(gest.s0 * d / gest.d0, .05, 40);
+    const mx = (a.x + b.x) / 2 - r.left, my = (a.y + b.y) / 2 - r.top;
+    const ix = (gest.mx - gest.ox) / gest.s0, iy = (gest.my - gest.oy) / gest.s0;
+    S.view = { s, x: mx - ix * s, y: my - iy * s }; render(); return;
+  }
+  if (gest.type === 'pan') { S.view.x = gest.ox + e.clientX - gest.sx; S.view.y = gest.oy + e.clientY - gest.sy; render(); return; }
+  if (gest.type === 'pending') {
+    if (Math.hypot(e.clientX - gest.sx, e.clientY - gest.sy) > 6 || performance.now() - gest.t > 90) {
+      const ok = TOOLS[S.tool].down(gest.p0);
+      if (ok === false) { gest = { type: 'pan', sx: gest.sx, sy: gest.sy, ox: S.view.x, oy: S.view.y }; return; }
+      gest = { type: 'tool' };
+    } else return;
+  }
+  if (gest.type === 'tool') TOOLS[S.tool].move?.(toImg(e.clientX, e.clientY));
+});
+const endPtr = e => {
+  if (!ptrs.has(e.pointerId)) return; ptrs.delete(e.pointerId);
+  if (!gest) return;
+  if (gest.type === 'pending') { const T = TOOLS[S.tool]; const ok = T.down(gest.p0); if (ok !== false) T.up?.(gest.p0); gest = null; return; }
+  if (gest.type === 'tool') { TOOLS[S.tool].up?.(toImg(e.clientX, e.clientY)); gest = null; return; }
+  if (gest.type === 'pan' && ptrs.size === 0) {
+    const now = performance.now(), moved = Math.hypot(e.clientX - gest.sx, e.clientY - gest.sy);
+    if (moved < 8 && now - gest.t < 250) { if (now - lastTap < 320) { fitView(); lastTap = 0; } else lastTap = now; }
+  }
+  if (ptrs.size === 0) gest = null; else if (gest.type === 'pinch') gest = null;
+};
+ev.addEventListener('pointerup', endPtr); ev.addEventListener('pointercancel', endPtr);
+ev.addEventListener('wheel', e => { e.preventDefault(); const r = ev.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top, k = Math.exp(-e.deltaY * .0015), ns = clamp(S.view.s * k, .05, 40); S.view.x = sx - (sx - S.view.x) * ns / S.view.s; S.view.y = sy - (sy - S.view.y) * ns / S.view.s; S.view.s = ns; render(); }, { passive: false });
+const cmpB = $('#eCmp');
+cmpB.addEventListener('pointerdown', e => { e.preventDefault(); S.hold = true; render(); });
+['pointerup', 'pointerleave', 'pointercancel'].forEach(t => cmpB.addEventListener(t, () => { if (S.hold) { S.hold = false; render(); } }));
+cmpB.addEventListener('contextmenu', e => e.preventDefault());
+function hint(msg) { const h = $('#eHint'); if (!msg) { h.hidden = true; return; } h.textContent = msg; h.hidden = false; }
+window.addEventListener('resize', () => { if ($('#editor').classList.contains('on')) { resizeEV(); fitView(); } if ($('#sub').classList.contains('on')) SUB.resize?.(); });
+
+/* ========== 儲存 ========== */
+async function saveCanvas(c, base = 'PochiEdit') {
+  const png = hasAlpha(c), type = png ? 'image/png' : 'image/jpeg', ext = png ? 'png' : 'jpg';
+  const blob = await new Promise(r => c.toBlob(r, type, .95));
+  if (!blob) return toast('儲存失敗，照片可能太大', 'err');
+  const name = `${base}_${stamp()}.${ext}`, file = new File([blob], name, { type });
+  if (navigator.canShare && navigator.canShare({ files: [file] }) && (IS_IOS || /Android/i.test(navigator.userAgent))) {
+    try { await navigator.share({ files: [file] }); toast(IS_IOS ? '在分享選單點「儲存影像」即可存到相簿' : '已開啟分享'); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000); toast(png ? '已儲存 PNG（保留透明背景）' : '已儲存');
+}
+/* ====================== AI 模型管理 ====================== */
+const HF = 'https://huggingface.co/';
+const MODELS = {
+  u2netp: { name: 'U²-Net-p 摳圖（快速）', size: '4.4 MB', url: HF + 'skillsafe-ai/u2netp/resolve/main/u2netp.onnx', use: '摳圖、影片主體去背' },
+  u2net: { name: 'U²-Net 摳圖（精細）', size: '168 MB', url: HF + 'skillsafe-ai/u2net/resolve/main/u2net.onnx', use: '摳圖（邊緣較精細）' },
+  modnet: { name: 'MODNet 人像', size: '12 MB', url: HF + 'skillsafe-ai/modnet/resolve/main/onnx/model_fp16.onnx', use: '影片人物去背' },
+  migan: { name: 'MI-GAN 消除填補', size: '28 MB', url: HF + 'andraniksargsyan/migan/resolve/main/migan_pipeline_v2.onnx', use: '消除、去水印' },
+  esr_fast: { name: 'Real-ESRGAN 快速', size: '4.6 MB', url: HF + 'skillsafe-ai/realesr-general-x4v3/resolve/main/model.onnx', use: '變清晰（general-x4v3）' },
+  esr_std: { name: 'Upscayl 標準', size: '32 MB', url: HF + 'skillsafe-ai/realesrgan-x4plus/resolve/main/model_fp16.onnx', use: '變清晰（Real-ESRGAN x4plus）' },
+  esr_art: { name: 'Upscayl 數位藝術', size: '8.6 MB', url: HF + 'skillsafe-ai/realesrgan-x4plus-anime-6b/resolve/main/model_fp16.onnx', use: '變清晰（x4plus anime 6B）' },
+};
+const UPSCALE_MODELS = [
+  { key: 'esr_fast', title: 'Real-ESRGAN 快速', desc: '一般照片，速度最快，檔案最小。' },
+  { key: 'esr_std', title: 'Upscayl 標準', desc: '照片細節最好，速度較慢。' },
+  { key: 'esr_art', title: 'Upscayl 數位藝術', desc: '插畫、動漫、文字截圖，線條更乾淨。' },
+];
+const sessions = {}, localModels = {};
+const hasWebGPU = !!navigator.gpu;
+let backendLabel = hasWebGPU ? 'WebGPU（顯示卡）' : 'WASM（處理器）';
+if (window.ort) {
+  ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/';
+  ort.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 2);
+  ort.env.logLevel = 'error';
+}
+async function modelCache() { try { return await caches.open('pochiedit-models-v1'); } catch { return null; } }
+async function isCached(key) { const c = await modelCache(); if (!c) return false; return !!(await c.match(MODELS[key].url)); }
+async function fetchModel(key, task) {
+  const m = MODELS[key];
+  if (localModels[key]) return localModels[key];
+  const cache = await modelCache();
+  if (cache) { const hit = await cache.match(m.url); if (hit) { task?.status(`讀取已下載的模型：${m.name}`); return new Uint8Array(await hit.arrayBuffer()); } }
+  task?.status(`下載模型：${m.name}（${m.size}，只需下載一次）`);
+  const res = await fetch(m.url, { signal: task?.signal });
+  if (!res.ok) throw new Error(`模型下載失敗（HTTP ${res.status}）`);
+  const total = +res.headers.get('content-length') || 0;
+  const reader = res.body.getReader(); const parts = []; let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    parts.push(value); got += value.length;
+    if (total) task?.progress(got / total, `下載模型：${m.name}  ${(got / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB`, '');
+    task?.check();
+  }
+  const buf = new Uint8Array(got); let o = 0; for (const p of parts) { buf.set(p, o); o += p.length; }
+  if (cache) try { await cache.put(m.url, new Response(buf, { headers: { 'content-type': 'application/octet-stream' } })); } catch (e) { console.warn('快取失敗', e); }
+  return buf;
+}
+async function getSession(key, task) {
+  if (sessions[key]) return sessions[key];
+  if (!window.ort) throw new Error('AI 執行環境沒有載入，請確認網路連線後重新整理頁面');
+  const buf = await fetchModel(key, task);
+  task?.check(); task?.status(`把模型載入${hasWebGPU ? '顯示卡' : '記憶體'}：${MODELS[key].name}`);
+  let sess;
+  try { sess = await ort.InferenceSession.create(buf, { executionProviders: hasWebGPU ? ['webgpu', 'wasm'] : ['wasm'], graphOptimizationLevel: 'all' }); }
+  catch (e) { console.warn('WebGPU 建立失敗，改用 WASM', e); sess = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'] }); backendLabel = 'WASM（處理器）'; }
+  sessions[key] = sess; return sess;
+}
+/* float16 互轉（部分 fp16 模型需要） */
+const _f32 = new Float32Array(1), _u32 = new Uint32Array(_f32.buffer);
+function f32ToF16(v) {
+  _f32[0] = v; const x = _u32[0], sign = (x >>> 16) & 0x8000; let e = ((x >>> 23) & 0xff) - 112, m = x & 0x7fffff;
+  if (e <= 0) return sign; if (e >= 31) return sign | 0x7c00; return sign | (e << 10) | (m >>> 13);
+}
+function f16ToF32(h) {
+  const s = (h & 0x8000) ? -1 : 1, e = (h >> 10) & 0x1f, f = h & 0x3ff;
+  if (e === 0) return s * Math.pow(2, -14) * (f / 1024); if (e === 31) return f ? NaN : s * Infinity;
+  return s * Math.pow(2, e - 15) * (1 + f / 1024);
+}
+function tensorToF32(t) {
+  if (t.type === 'float32') return t.data;
+  if (t.type === 'float16') { const d = t.data, o = new Float32Array(d.length); if (d instanceof Uint16Array) for (let i = 0; i < d.length; i++) o[i] = f16ToF32(d[i]); else for (let i = 0; i < d.length; i++) o[i] = d[i]; return o; }
+  return Float32Array.from(t.data);
+}
+/* 執行單一輸入的影像模型，自動判斷 float32 / float16 */
+async function runImage(sess, data, dims, outIndex = 0) {
+  const name = sess.inputNames[0];
+  const mk = f16 => {
+    if (!f16) return new ort.Tensor('float32', data, dims);
+    const u = new Uint16Array(data.length); for (let i = 0; i < data.length; i++) u[i] = f32ToF16(data[i]); return new ort.Tensor('float16', u, dims);
+  };
+  let res;
+  if (sess._f16 === undefined) {
+    try { res = await sess.run({ [name]: mk(false) }); sess._f16 = false; }
+    catch (e) { if (/float16|type|Unexpected input data type/i.test(String(e.message))) { res = await sess.run({ [name]: mk(true) }); sess._f16 = true; } else throw e; }
+  } else res = await sess.run({ [name]: mk(sess._f16) });
+  const t = res[sess.outputNames[outIndex]];
+  return { data: tensorToF32(t), dims: t.dims };
+}
+
+/* ---------- 摳圖：U²-Net / MODNet ---------- */
+const MEAN = [0.485, 0.456, 0.406], STD = [0.229, 0.224, 0.225];
+let _tmpSmall = null;
+function smallCanvas(w, h) { if (!_tmpSmall || _tmpSmall.width !== w || _tmpSmall.height !== h) _tmpSmall = mkCanvas(w, h); return _tmpSmall; }
+// 回傳 {mask: Float32Array(0..1), w, h}（模型解析度）
+async function segment(src, kind, task) {
+  if (kind === 'modnet') {
+    const sess = await getSession('modnet', task);
+    const k = 512 / Math.max(src.width, src.height);
+    const w = Math.max(32, Math.round(src.width * k / 32) * 32), h = Math.max(32, Math.round(src.height * k / 32) * 32);
+    const c = smallCanvas(w, h), x = c2d(c); x.clearRect(0, 0, w, h); x.drawImage(src, 0, 0, w, h);
+    const d = x.getImageData(0, 0, w, h).data, n = w * h, inp = new Float32Array(3 * n);
+    for (let i = 0; i < n; i++) { inp[i] = d[i * 4] / 127.5 - 1; inp[n + i] = d[i * 4 + 1] / 127.5 - 1; inp[2 * n + i] = d[i * 4 + 2] / 127.5 - 1; }
+    const out = await runImage(sess, inp, [1, 3, h, w]);
+    return { mask: out.data, w, h };
+  }
+  const sess = await getSession(kind, task), S2 = 320;
+  const c = smallCanvas(S2, S2), x = c2d(c); x.clearRect(0, 0, S2, S2); x.imageSmoothingQuality = 'high'; x.drawImage(src, 0, 0, S2, S2);
+  const d = x.getImageData(0, 0, S2, S2).data, n = S2 * S2, inp = new Float32Array(3 * n);
+  let mx = 1; for (let i = 0; i < d.length; i += 4) mx = Math.max(mx, d[i], d[i + 1], d[i + 2]);
+  for (let i = 0; i < n; i++) for (let ch = 0; ch < 3; ch++) inp[ch * n + i] = (d[i * 4 + ch] / mx - MEAN[ch]) / STD[ch];
+  const out = await runImage(sess, inp, [1, 3, S2, S2]);
+  const m = out.data; let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < n; i++) { if (m[i] < lo) lo = m[i]; if (m[i] > hi) hi = m[i]; }
+  const r = hi - lo || 1, mask = new Float32Array(n); for (let i = 0; i < n; i++) mask[i] = (m[i] - lo) / r;
+  return { mask, w: S2, h: S2 };
+}
+// 把模型解析度的遮罩放大成圖片尺寸的 alpha（Uint8ClampedArray）
+function maskToCanvas(mask, w, h) {
+  const c = mkCanvas(w, h), x = c2d(c), id = x.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) { id.data[i * 4 + 3] = clamp(mask[i] * 255, 0, 255); }
+  x.putImageData(id, 0, 0); return c;
+}
+function upsampleAlpha(mask, mw, mh, W, H) {
+  const sc = maskToCanvas(mask, mw, mh), big = mkCanvas(W, H), x = c2d(big);
+  x.imageSmoothingQuality = 'high'; x.drawImage(sc, 0, 0, W, H);
+  const d = x.getImageData(0, 0, W, H).data, a = new Uint8ClampedArray(W * H);
+  for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3]; return a;
+}
+
+/* ---------- 消除：MI-GAN ---------- */
+// mask：與 src 同尺寸的 canvas，alpha>0 代表要消除
+function maskBBox(mask) {
+  const d = getData(mask).data, W = mask.width, H = mask.height; let x0 = W, y0 = H, x1 = -1, y1 = -1;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (d[(y * W + x) * 4 + 3] > 20) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+// 準備可重複使用的消除設定（影片逐格用）
+function prepInpaint(W, H, mask, bbox) {
+  const cw = Math.min(W, Math.max(384, Math.round(bbox.w * 2.2 + 64))), ch = Math.min(H, Math.max(384, Math.round(bbox.h * 2.2 + 64)));
+  const cx = clamp(Math.round(bbox.x + bbox.w / 2 - cw / 2), 0, W - cw), cy = clamp(Math.round(bbox.y + bbox.h / 2 - ch / 2), 0, H - ch);
+  const md = c2d(mask).getImageData(cx, cy, cw, ch).data, n = cw * ch, a = new Float32Array(n);
+  for (let i = 0; i < n; i++) a[i] = md[i * 4 + 3] / 255;
+  const dil = blurF(a, cw, ch, 3, 1), mk = new Uint8Array(n), hole = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const h = dil[i] > .04 ? 1 : 0; mk[i] = h ? 0 : 255; hole[i] = h; }
+  const fe = blurF(hole, cw, ch, 2, 1), feather = new Float32Array(n);
+  for (let i = 0; i < n; i++) feather[i] = mk[i] ? 0 : Math.min(1, fe[i] * 1.6);
+  return { cx, cy, cw, ch, mk, feather, prevFill: null };
+}
+async function inpaintWith(src, P, task, { smooth = 0 } = {}) {
+  const sess = await getSession('migan', task); task?.check();
+  const { cx, cy, cw, ch, mk, feather } = P, n = cw * ch;
+  const sx = c2d(src), id = sx.getImageData(cx, cy, cw, ch), d = id.data;
+  const img = new Uint8Array(3 * n);
+  for (let i = 0; i < n; i++) { img[i] = d[i * 4]; img[n + i] = d[i * 4 + 1]; img[2 * n + i] = d[i * 4 + 2]; }
+  const names = sess.inputNames, mName = names.find(s => /mask/i.test(s)) || names[1], iName = names.find(s => s !== mName);
+  const res = await sess.run({ [iName]: new ort.Tensor('uint8', img, [1, 3, ch, cw]), [mName]: new ort.Tensor('uint8', mk, [1, 1, ch, cw]) });
+  const out = res[sess.outputNames[0]].data;
+  const fill = new Uint8ClampedArray(3 * n);
+  for (let i = 0; i < 3 * n; i++) fill[i] = out[i];
+  if (smooth > 0 && P.prevFill) for (let i = 0; i < 3 * n; i++) fill[i] = fill[i] * (1 - smooth) + P.prevFill[i] * smooth;
+  P.prevFill = fill;
+  for (let i = 0; i < n; i++) {
+    const f = feather[i]; if (f <= 0) continue;
+    d[i * 4] = d[i * 4] * (1 - f) + fill[i] * f; d[i * 4 + 1] = d[i * 4 + 1] * (1 - f) + fill[n + i] * f; d[i * 4 + 2] = d[i * 4 + 2] * (1 - f) + fill[2 * n + i] * f;
+  }
+  return id;
+}
+async function inpaintImage(src, mask, task) {
+  const bb = maskBBox(mask); if (!bb) return null;
+  const P = prepInpaint(src.width, src.height, mask, bb);
+  task.status('AI 正在填補…');
+  const out = cloneCanvas(src);
+  const id = await inpaintWith(out, P, task);
+  task.check();
+  c2d(out).putImageData(id, P.cx, P.cy);
+  return out;
+}
+
+/* ---------- 變清晰：Real-ESRGAN 分塊放大 ---------- */
+async function aiUpscale(src, key, scale, task, { quiet = false, onTile } = {}) {
+  const sess = await getSession(key, task);
+  const W = src.width, H = src.height, T = 160, P = 12;
+  const sd = getData(src).data;
+  let R = 4, out = null, ox = null;
+  const tiles = []; for (let ty = 0; ty < H; ty += T) for (let tx = 0; tx < W; tx += T) tiles.push([tx, ty]);
+  let done = 0;
+  for (const [tx, ty] of tiles) {
+    task.check();
+    const x0 = Math.max(0, tx - P), y0 = Math.max(0, ty - P), x1 = Math.min(W, tx + T + P), y1 = Math.min(H, ty + T + P);
+    const w = x1 - x0, h = y1 - y0, n = w * h, inp = new Float32Array(3 * n);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const si = ((y0 + y) * W + x0 + x) * 4, i = y * w + x;
+      inp[i] = sd[si] / 255; inp[n + i] = sd[si + 1] / 255; inp[2 * n + i] = sd[si + 2] / 255;
+    }
+    const r = await runImage(sess, inp, [1, 3, h, w]);
+    const oh = r.dims[2], ow = r.dims[3];
+    if (!out) { R = Math.round(ow / w); out = mkCanvas(W * R, H * R); ox = c2d(out); }
+    const cw = Math.min(T, W - tx), chh = Math.min(T, H - ty), offX = (tx - x0) * R, offY = (ty - y0) * R;
+    const id = ox.createImageData(cw * R, chh * R), od = id.data, on = ow * oh, o = r.data;
+    for (let y = 0; y < chh * R; y++) for (let x = 0; x < cw * R; x++) {
+      const si = (y + offY) * ow + x + offX, di = (y * cw * R + x) * 4;
+      od[di] = o[si] * 255; od[di + 1] = o[on + si] * 255; od[di + 2] = o[2 * on + si] * 255; od[di + 3] = 255;
+    }
+    ox.putImageData(id, tx * R, ty * R);
+    done++;
+    if (!quiet) task.progress(done / tiles.length, `AI 放大中：第 ${done} / ${tiles.length} 塊`);
+    onTile?.(done / tiles.length);
+  }
+  // 保留透明度
+  if (hasAlpha(src)) {
+    const a = mkCanvas(W * R, H * R), ax = a.getContext('2d'); ax.imageSmoothingQuality = 'high'; ax.drawImage(src, 0, 0, W * R, H * R);
+    ox.globalCompositeOperation = 'destination-in'; ox.drawImage(a, 0, 0); ox.globalCompositeOperation = 'source-over';
+  }
+  if (scale !== R) return resizeCanvas(out, Math.round(W * scale), Math.round(H * scale));
+  return out;
+}
+/* ========== 影像演算法 ========== */
+// 快速盒狀模糊（近似高斯），不依賴 ctx.filter，手機 Safari 也能用
+function blurF(a, W, H, r, passes = 2) {
+  r = Math.max(1, Math.round(r)); const n = W * H, div = 2 * r + 1;
+  let s = a; const t = new Float32Array(n); let u = new Float32Array(n);
+  for (let p = 0; p < passes; p++) {
+    for (let y = 0; y < H; y++) {
+      const o = y * W; let acc = 0;
+      for (let i = -r; i <= r; i++) acc += s[o + clamp(i, 0, W - 1)];
+      for (let x = 0; x < W; x++) { t[o + x] = acc / div; acc += s[o + Math.min(W - 1, x + r + 1)] - s[o + Math.max(0, x - r)]; }
+    }
+    for (let x = 0; x < W; x++) {
+      let acc = 0;
+      for (let i = -r; i <= r; i++) acc += t[clamp(i, 0, H - 1) * W + x];
+      for (let y = 0; y < H; y++) { u[y * W + x] = acc / div; acc += t[Math.min(H - 1, y + r + 1) * W + x] - t[Math.max(0, y - r) * W + x]; }
+    }
+    s = u; if (p < passes - 1) u = new Float32Array(n);
+  }
+  return s;
+}
+function splitRGB(d, n) { const R = new Float32Array(n), G = new Float32Array(n), B = new Float32Array(n); for (let i = 0; i < n; i++) { R[i] = d[i * 4]; G[i] = d[i * 4 + 1]; B[i] = d[i * 4 + 2]; } return [R, G, B]; }
+function skinProb(r, g, b) {
+  const cb = 128 - .168736 * r - .331264 * g + .5 * b, cr = 128 + .5 * r - .418688 * g - .081312 * b;
+  const band = (v, a, z, s) => clamp(Math.min((v - a) / s + 1, (z - v) / s + 1), 0, 1);
+  return band(cb, 77, 127, 10) * band(cr, 133, 175, 10);
+}
+const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+
+/* ---------- 臉部關鍵點 ---------- */
+const FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
+const LIPS_OUT = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185];
+const LIPS_IN = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 415, 310, 311, 312, 13, 82, 81, 80, 191];
+const EYE_R = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246];
+const EYE_L = [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466];
+const LOWER_R = [33, 7, 163, 144, 145, 153, 154, 155, 133], LOWER_L = [263, 249, 390, 373, 374, 380, 381, 382, 362];
+const UPPER_R = [33, 246, 161, 160, 159, 158, 157, 173, 133], UPPER_L = [263, 466, 388, 387, 386, 385, 384, 398, 362];
+const BROW_R = [46, 53, 52, 65, 55, 107, 66, 105, 63, 70], BROW_L = [276, 283, 282, 295, 285, 336, 296, 334, 293, 300];
+const JAW_R = [132, 58, 172, 136, 150, 149], JAW_L = [361, 288, 397, 365, 379, 378];
+const P = (f, i, W, H) => ({ x: f[i].x * W, y: f[i].y * H });
+const pts = (f, idx, W, H) => idx.map(i => P(f, i, W, H));
+function fInfo(f, W, H) {
+  const L = P(f, 234, W, H), R = P(f, 454, W, H), T = P(f, 10, W, H), B = P(f, 152, W, H);
+  return { w: dist(L, R), h: dist(T, B), nose: P(f, 1, W, H), mid: P(f, 168, W, H), chin: B, top: T, L, R };
+}
+function pathPts(ctx, p) { ctx.moveTo(p[0].x, p[0].y); for (let i = 1; i < p.length; i++) ctx.lineTo(p[i].x, p[i].y); ctx.closePath(); }
+// 由多邊形畫出遮罩（白色＋alpha），可挖洞與羽化
+function polyMask(W, H, polys, { cut = [], feather = 0, grow = 0 } = {}) {
+  const c = mkCanvas(W, H), x = c.getContext('2d'); x.fillStyle = '#fff'; x.strokeStyle = '#fff'; x.lineJoin = 'round';
+  x.beginPath(); polys.forEach(p => pathPts(x, p)); x.fill(); if (grow > 0) { x.lineWidth = grow * 2; x.stroke(); }
+  if (cut.length) { x.globalCompositeOperation = 'destination-out'; x.beginPath(); cut.forEach(p => pathPts(x, p)); x.fill(); x.globalCompositeOperation = 'source-over'; }
+  if (feather > 0) featherAlpha(c, feather);
+  return c;
+}
+function featherAlpha(c, r) {
+  const id = getData(c), d = id.data, n = c.width * c.height, a = new Float32Array(n);
+  for (let i = 0; i < n; i++) a[i] = d[i * 4 + 3];
+  const b = blurF(a, c.width, c.height, r, 2);
+  for (let i = 0; i < n; i++) { d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = 255; d[i * 4 + 3] = b[i]; }
+  c2d(c).putImageData(id, 0, 0); return c;
+}
+function maskAlpha(c) { const d = getData(c).data, n = c.width * c.height, a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = d[i * 4 + 3] / 255; return a; }
+// 臉部皮膚區域（排除眼睛、眉毛、嘴巴）
+function faceSkinRegion(W, H, faces, feather = true) {
+  if (!faces.length) return null;
+  const c = mkCanvas(W, H), x = c.getContext('2d'); let fw = 0;
+  x.fillStyle = '#fff'; x.beginPath(); faces.forEach(f => { pathPts(x, pts(f, FACE_OVAL, W, H)); fw = Math.max(fw, fInfo(f, W, H).w); }); x.fill();
+  x.globalCompositeOperation = 'destination-out'; x.strokeStyle = '#000'; x.lineJoin = 'round';
+  faces.forEach(f => {
+    const g = fInfo(f, W, H).w;
+    [EYE_R, EYE_L, BROW_R, BROW_L, LIPS_OUT].forEach(idx => { x.beginPath(); pathPts(x, pts(f, idx, W, H)); x.lineWidth = g * .03; x.fill(); x.stroke(); });
+  });
+  if (feather) featherAlpha(c, Math.max(2, fw / 28));
+  return maskAlpha(c);
+}
+
+/* ---------- 美顏 ---------- */
+function bSmooth(id, faces, amt) {
+  if (amt <= 0) return id;
+  const { width: W, height: H, data: d } = id, n = W * H;
+  const fw = faces.length ? Math.max(...faces.map(f => fInfo(f, W, H).w)) : Math.min(W, H) * .5;
+  const r = clamp(fw / 42, 1.5, 36), [R, G, B] = splitRGB(d, n);
+  const bR = blurF(R, W, H, r), bG = blurF(G, W, H, r), bB = blurF(B, W, H, r);
+  const reg = faceSkinRegion(W, H, faces);
+  for (let i = 0; i < n; i++) {
+    const o = i * 4, r0 = d[o], g0 = d[o + 1], b0 = d[o + 2];
+    const sk = skinProb(r0, g0, b0), rg = reg ? reg[i] : 1; if (rg <= 0) continue;
+    const diff = (Math.abs(bR[i] - r0) + Math.abs(bG[i] - g0) + Math.abs(bB[i] - b0)) / 3;
+    const w = amt * rg * (reg ? .4 + .6 * sk : sk) * clamp(1 - diff / 40, 0, 1);
+    if (w <= 0) continue;
+    d[o] = r0 + (bR[i] - r0) * w; d[o + 1] = g0 + (bG[i] - g0) * w; d[o + 2] = b0 + (bB[i] - b0) * w;
+  }
+  return id;
+}
+function bWhiten(id, faces, amt) {
+  if (amt <= 0) return id;
+  const d = id.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2], sk = skinProb(r, g, b); if (sk <= 0) continue;
+    const k = amt * sk, L = .299 * r + .587 * g + .114 * b;
+    let nr = r + (255 - r) * k * .32, ng = g + (255 - g) * k * .3, nb = b + (255 - b) * k * .3;
+    const L2 = .299 * nr + .587 * ng + .114 * nb, ds = k * .18;
+    nr = nr + (L2 - nr) * ds + k * 5; ng = ng + (L2 - ng) * ds; nb = nb + (L2 - nb) * ds + k * 2;
+    d[i] = nr; d[i + 1] = ng; d[i + 2] = nb;
+  }
+  return id;
+}
+function bDarkCircle(id, faces, amt) {
+  if (amt <= 0 || !faces.length) return id;
+  const { width: W, height: H, data: d } = id, polys = []; let fw = 0;
+  faces.forEach(f => {
+    const g = fInfo(f, W, H); fw = Math.max(fw, g.w);
+    [[LOWER_R, 33, 133], [LOWER_L, 263, 362]].forEach(([idx, a, b]) => {
+      const lid = pts(f, idx, W, H), ew = dist(P(f, a, W, H), P(f, b, W, H)), off = ew * .42;
+      const low = lid.map((p, k) => ({ x: p.x, y: p.y + off * Math.sin(Math.PI * k / (lid.length - 1)) + ew * .06 }));
+      polys.push([...lid.map(p => ({ x: p.x, y: p.y + ew * .05 })), ...low.reverse()]);
+    });
+  });
+  const m = maskAlpha(polyMask(W, H, polys, { feather: Math.max(2, fw / 40) }));
+  for (let i = 0; i < m.length; i++) {
+    const w = m[i] * amt; if (w <= .01) continue; const o = i * 4;
+    d[o] += 26 * w; d[o + 1] += 22 * w; d[o + 2] += 16 * w;
+  }
+  return id;
+}
+function bBrightEyes(id, faces, amt) {
+  if (amt <= 0 || !faces.length) return id;
+  const { width: W, height: H, data: d } = id; let fw = 0;
+  const irisC = mkCanvas(W, H), ix = irisC.getContext('2d'); ix.fillStyle = '#fff';
+  const eyeP = [];
+  faces.forEach(f => {
+    const g = fInfo(f, W, H); fw = Math.max(fw, g.w);
+    eyeP.push(pts(f, EYE_R, W, H), pts(f, EYE_L, W, H));
+    if (f.length >= 478) [[468, 469], [473, 474]].forEach(([c, e]) => { const C = P(f, c, W, H), r = dist(C, P(f, e, W, H)) * 1.05; ix.beginPath(); ix.arc(C.x, C.y, r, 0, 7); ix.fill(); });
+  });
+  const eyeM = maskAlpha(polyMask(W, H, eyeP, { feather: Math.max(1, fw / 120) }));
+  featherAlpha(irisC, Math.max(1, fw / 160)); const ir = maskAlpha(irisC);
+  for (let i = 0; i < eyeM.length; i++) {
+    const e = eyeM[i]; if (e <= .01) continue; const o = i * 4, irw = ir[i] * e * amt;
+    let r = d[o], g = d[o + 1], b = d[o + 2]; const L = .299 * r + .587 * g + .114 * b;
+    if (irw > 0) { const c = 1 + .55 * irw; r = (r - 110) * c + 110 + 14 * irw; g = (g - 110) * c + 110 + 14 * irw; b = (b - 110) * c + 110 + 14 * irw; }
+    const wh = e * amt * (1 - ir[i]) * smoothstep(90, 170, L);
+    if (wh > 0) { r += (255 - r) * .25 * wh; g += (255 - g) * .25 * wh; b += (255 - b) * .3 * wh; }
+    d[o] = r; d[o + 1] = g; d[o + 2] = b;
+  }
+  return id;
+}
+function bTeeth(id, faces, amt) {
+  if (amt <= 0 || !faces.length) return id;
+  const { width: W, height: H, data: d } = id; let fw = 0;
+  const m = maskAlpha(polyMask(W, H, faces.map(f => { fw = Math.max(fw, fInfo(f, W, H).w); return pts(f, LIPS_IN, W, H); }), { feather: Math.max(1, fw / 150) }));
+  for (let i = 0; i < m.length; i++) {
+    const w0 = m[i]; if (w0 <= .01) continue; const o = i * 4;
+    let r = d[o], g = d[o + 1], b = d[o + 2]; const L = .299 * r + .587 * g + .114 * b, w = w0 * amt * smoothstep(60, 120, L);
+    if (w <= 0) continue;
+    const yel = Math.max(0, (r + g) / 2 - b); b += yel * .85 * w; r -= yel * .12 * w;
+    const L2 = .299 * r + .587 * g + .114 * b; r += (L2 - r) * .35 * w; g += (L2 - g) * .35 * w; b += (L2 - b) * .35 * w;
+    r += (255 - r) * .22 * w; g += (255 - g) * .22 * w; b += (255 - b) * .22 * w;
+    d[o] = r; d[o + 1] = g; d[o + 2] = b;
+  }
+  return id;
+}
+// 祛痘：把一小圈換成周圍的平滑膚色，保留一點紋理
+function healSpot(canvas, x, y, rad) {
+  const W = canvas.width, H = canvas.height, R = Math.ceil(rad * 2.4);
+  const x0 = clamp(Math.floor(x - R), 0, W - 1), y0 = clamp(Math.floor(y - R), 0, H - 1), x1 = clamp(Math.ceil(x + R), 0, W), y1 = clamp(Math.ceil(y + R), 0, H);
+  const w = x1 - x0, h = y1 - y0; if (w < 3 || h < 3) return;
+  const ctx = c2d(canvas), id = ctx.getImageData(x0, y0, w, h), d = id.data, n = w * h;
+  const [Rr, Gg, Bb] = splitRGB(d, n), rb = Math.max(2, rad * .9);
+  const sR = blurF(Rr, w, h, rb), sG = blurF(Gg, w, h, rb), sB = blurF(Bb, w, h, rb);
+  const fR = blurF(Rr, w, h, 1, 1), fG = blurF(Gg, w, h, 1, 1), fB = blurF(Bb, w, h, 1, 1);
+  // 以圓周顏色當目標，避免痘痘本身的顏色混進去
+  let cr = 0, cg = 0, cb = 0, cn = 0;
+  for (let k = 0; k < 24; k++) { const a = k / 24 * Math.PI * 2, px = Math.round(x - x0 + Math.cos(a) * rad * 1.6), py = Math.round(y - y0 + Math.sin(a) * rad * 1.6); if (px < 0 || py < 0 || px >= w || py >= h) continue; const i = py * w + px; cr += sR[i]; cg += sG[i]; cb += sB[i]; cn++; }
+  if (!cn) return; cr /= cn; cg /= cn; cb /= cn;
+  for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
+    const dd = Math.hypot(px + x0 - x, py + y0 - y) / rad; if (dd >= 1.35) continue;
+    const t = 1 - smoothstep(.75, 1.35, dd), i = py * w + px, o = i * 4;
+    const tr = cr + (Rr[i] - fR[i]) * .5, tg = cg + (Gg[i] - fG[i]) * .5, tb = cb + (Bb[i] - fB[i]) * .5;
+    d[o] += (tr - d[o]) * t; d[o + 1] += (tg - d[o + 1]) * t; d[o + 2] += (tb - d[o + 2]) * t;
+  }
+  ctx.putImageData(id, x0, y0);
+}
+
+/* ---------- 液化變形 ---------- */
+function wMove(cx, cy, r, mx, my) { return { t: 'move', cx, cy, r, r2: r * r, mx, my }; }
+function wScale(cx, cy, r, ax, ay = ax) { return { t: 'scale', cx, cy, r, r2: r * r, ax, ay }; }
+function applyWarps(src, warps) {
+  warps = warps.filter(w => w.r > 1 && (w.t === 'move' ? Math.hypot(w.mx, w.my) > .05 : Math.abs(w.ax) + Math.abs(w.ay) > .001));
+  if (!warps.length) return src;
+  const W = src.width, H = src.height; let x0 = W, y0 = H, x1 = 0, y1 = 0;
+  warps.forEach(w => { x0 = Math.min(x0, w.cx - w.r); y0 = Math.min(y0, w.cy - w.r); x1 = Math.max(x1, w.cx + w.r); y1 = Math.max(y1, w.cy + w.r); });
+  x0 = clamp(Math.floor(x0), 0, W - 1); y0 = clamp(Math.floor(y0), 0, H - 1); x1 = clamp(Math.ceil(x1), 0, W); y1 = clamp(Math.ceil(y1), 0, H);
+  const sid = getData(src), sd = sid.data, out = new ImageData(new Uint8ClampedArray(sd), W, H), od = out.data;
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+    let px = x, py = y, moved = false;
+    for (let k = warps.length - 1; k >= 0; k--) {
+      const w = warps[k], dx = px - w.cx, dy = py - w.cy, d2 = dx * dx + dy * dy; if (d2 >= w.r2) continue; moved = true;
+      if (w.t === 'move') { const m2 = w.mx * w.mx + w.my * w.my; let f = (w.r2 - d2) / (w.r2 - d2 + m2); f *= f; px -= f * w.mx; py -= f * w.my; }
+      else { const t = 1 - d2 / w.r2, tt = t * t; px = w.cx + dx * (1 - w.ax * tt); py = w.cy + dy * (1 - w.ay * tt); }
+    }
+    if (!moved) continue;
+    const fx = clamp(px, 0, W - 1.001), fy = clamp(py, 0, H - 1.001), ix = fx | 0, iy = fy | 0, ax = fx - ix, ay = fy - iy;
+    const i00 = (iy * W + ix) * 4, i10 = i00 + 4, i01 = i00 + W * 4, i11 = i01 + 4, o = (y * W + x) * 4;
+    for (let c = 0; c < 4; c++) od[o + c] = (sd[i00 + c] * (1 - ax) + sd[i10 + c] * ax) * (1 - ay) + (sd[i01 + c] * (1 - ax) + sd[i11 + c] * ax) * ay;
+  }
+  return putData(out);
+}
+function faceWarps(faces, W, H, p) {
+  const ws = [];
+  faces.forEach(f => {
+    const g = fInfo(f, W, H), fw = g.w, fh = g.h, n = g.nose;
+    if (p.slim) [...JAW_R, ...JAW_L].forEach(i => { const q = P(f, i, W, H), dx = n.x - q.x, dy = (n.y - q.y) * .3, l = Math.hypot(dx, dy) || 1; ws.push(wMove(q.x, q.y, fw * .24, dx / l * fw * .028 * p.slim, dy / l * fw * .028 * p.slim)); });
+    if (p.small) { const c = { x: (g.mid.x + g.chin.x) / 2, y: (g.mid.y + g.chin.y) / 2 }; ws.push(wScale(c.x, c.y, fh * .8, -.13 * p.small)); }
+    if (p.eyes) [[33, 133, 468], [263, 362, 473]].forEach(([a, b, c]) => { const A = P(f, a, W, H), B = P(f, b, W, H), C = f.length > c ? P(f, c, W, H) : { x: (A.x + B.x) / 2, y: (A.y + B.y) / 2 }; ws.push(wScale(C.x, C.y, dist(A, B) * 1.05, .26 * p.eyes)); });
+    if (p.nose) { const nw = dist(P(f, 129, W, H), P(f, 358, W, H)), c = P(f, 4, W, H); ws.push(wScale(c.x, c.y - nw * .2, nw * 1.5, .32 * p.nose, .04 * p.nose)); }
+    if (p.chin) { const dx = g.chin.x - n.x, dy = g.chin.y - n.y, l = Math.hypot(dx, dy) || 1; ws.push(wMove(g.chin.x, g.chin.y, fh * .34, dx / l * fh * .07 * p.chin, dy / l * fh * .07 * p.chin)); }
+    if (p.forehead) { const dx = g.top.x - g.mid.x, dy = g.top.y - g.mid.y, l = Math.hypot(dx, dy) || 1; ws.push(wMove(g.top.x, g.top.y, fh * .36, dx / l * fh * .06 * p.forehead, dy / l * fh * .06 * p.forehead)); }
+  });
+  return ws;
+}
+function poseInfo(pose, W, H) {
+  const g = i => ({ x: pose[i].x * W, y: pose[i].y * H, v: pose[i].visibility ?? 1 });
+  const ls = g(11), rs = g(12), lh = g(23), rh = g(24), lk = g(25), rk = g(26);
+  const sh = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 }, hp = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 }, kn = { x: (lk.x + rk.x) / 2, y: (lk.y + rk.y) / 2 };
+  return { sh, hp, kn, shW: dist(ls, rs), hpW: Math.max(dist(lh, rh), dist(ls, rs) * .55), kneeOk: lk.v > .3 && rk.v > .3 };
+}
+function bodyWarps(pose, W, H, p) {
+  const b = poseInfo(pose, W, H), ws = [], lerp = (a, c, t) => ({ x: a.x + (c.x - a.x) * t, y: a.y + (c.y - a.y) * t });
+  const side = (c, half, amt, r) => { ws.push(wMove(c.x - half, c.y, r, half * amt, 0)); ws.push(wMove(c.x + half, c.y, r, -half * amt, 0)); };
+  if (p.waist) { const c = lerp(b.hp, b.sh, .3); side(c, b.hpW * .9, .2 * p.waist, b.hpW * .85); }
+  if (p.slim) {
+    const kn = b.kneeOk ? b.kn : { x: b.hp.x, y: b.hp.y + (b.hp.y - b.sh.y) * .9 };
+    [[lerp(b.sh, b.hp, .2), b.shW * .55], [lerp(b.sh, b.hp, .62), b.hpW * .9], [b.hp, b.hpW * 1.05], [lerp(b.hp, kn, .45), b.hpW * .85]]
+      .forEach(([c, half]) => side(c, half, .14 * p.slim, half * 1.0));
+  }
+  return ws;
+}
+function stretchLegs(src, startY, amt) {
+  if (amt <= 0) return src;
+  const W = src.width, H = src.height, y0 = clamp(Math.round(startY), 1, H - 2), k = 1 + .2 * amt, nh = Math.round(y0 + (H - y0) * k);
+  const out = mkCanvas(W, nh), x = out.getContext('2d'); x.imageSmoothingQuality = 'high';
+  x.drawImage(src, 0, 0, W, y0, 0, 0, W, y0); x.drawImage(src, 0, y0, W, H - y0, 0, y0, W, nh - y0);
+  return out;
+}
+
+/* ---------- 美妝 ---------- */
+function layerOf(mask, fill) { const c = mkCanvas(mask.width, mask.height), x = c.getContext('2d'); x.fillStyle = fill; x.fillRect(0, 0, c.width, c.height); x.globalCompositeOperation = 'destination-in'; x.drawImage(mask, 0, 0); return c; }
+function blendOn(dst, layer, mode, alpha) { if (alpha <= 0) return; const x = dst.getContext('2d'); x.save(); x.globalAlpha = clamp(alpha, 0, 1); x.globalCompositeOperation = mode; x.drawImage(layer, 0, 0); x.restore(); }
+function applyMakeup(src, faces, MK) {
+  const out = cloneCanvas(src), W = out.width, H = out.height;
+  faces.forEach(f => {
+    const g = fInfo(f, W, H), fw = g.w;
+    if (MK.lip.a > 0) { const m = polyMask(W, H, [pts(f, LIPS_OUT, W, H)], { cut: [pts(f, LIPS_IN, W, H)], feather: Math.max(1, fw * .007) }); const L = layerOf(m, MK.lip.c); blendOn(out, L, 'color', MK.lip.a * .8); blendOn(out, L, 'multiply', MK.lip.a * .35); blendOn(out, L, 'soft-light', MK.lip.a * .35); }
+    if (MK.blush.a > 0) {
+      const m = mkCanvas(W, H), x = m.getContext('2d');
+      [[50, 1], [280, 1]].forEach(([i]) => { const c = P(f, i, W, H), r = fw * .17, gr = x.createRadialGradient(c.x, c.y, 0, c.x, c.y, r); gr.addColorStop(0, '#fff'); gr.addColorStop(.5, 'rgba(255,255,255,.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = gr; x.beginPath(); x.ellipse(c.x, c.y, r, r * .78, 0, 0, 7); x.fill(); });
+      x.globalCompositeOperation = 'destination-in'; x.drawImage(polyMask(W, H, [pts(f, FACE_OVAL, W, H)], { feather: fw * .02 }), 0, 0);
+      const L = layerOf(m, MK.blush.c); blendOn(out, L, 'multiply', MK.blush.a * .45); blendOn(out, L, 'soft-light', MK.blush.a * .5);
+    }
+    if (MK.brow.a > 0) { const m = polyMask(W, H, [pts(f, BROW_R, W, H), pts(f, BROW_L, W, H)], { feather: Math.max(1, fw * .006) }); blendOn(out, layerOf(m, MK.brow.c), 'multiply', MK.brow.a * .6); }
+    if (MK.shadow.a > 0) {
+      const polys = [[UPPER_R, 33, 133], [UPPER_L, 263, 362]].map(([idx, a, b]) => { const lid = pts(f, idx, W, H), ew = dist(P(f, a, W, H), P(f, b, W, H)); const up = lid.map((p, k) => ({ x: p.x, y: p.y - ew * .42 * Math.sin(Math.PI * k / (lid.length - 1)) - ew * .05 })); return [...lid, ...up.reverse()]; });
+      const m = polyMask(W, H, polys, { cut: [pts(f, EYE_R, W, H), pts(f, EYE_L, W, H)], feather: Math.max(1, fw * .018) });
+      const L = layerOf(m, MK.shadow.c); blendOn(out, L, 'multiply', MK.shadow.a * .5); blendOn(out, L, 'soft-light', MK.shadow.a * .4);
+    }
+    if (MK.contour.a > 0) {
+      const oval = pts(f, FACE_OVAL, W, H), c = g.nose, inner = oval.map(p => ({ x: c.x + (p.x - c.x) * .74, y: c.y + (p.y - c.y) * .8 }));
+      const m = polyMask(W, H, [oval], { cut: [inner], feather: fw * .05 });
+      const x = m.getContext('2d'); x.globalCompositeOperation = 'destination-out'; x.fillRect(0, 0, W, g.mid.y); x.globalCompositeOperation = 'source-over';
+      blendOn(out, layerOf(m, MK.contour.c), 'multiply', MK.contour.a * .4);
+    }
+  });
+  return out;
+}
+
+/* ---------- 調色 ---------- */
+const C0 = { bri: 0, con: 0, sat: 0, temp: 0, tint: 0, hi: 0, sh: 0, sharp: 0, vig: 0, fade: 0 };
+function colorProcess(id, P0, f = 'none', fint = 100) {
+  const Pm = { ...C0, ...P0 }, d = id.data, W = id.width, H = id.height, k = fint / 100;
+  const cv = Pm.con * 2.55, cf = (259 * (cv + 255)) / (255 * (259 - cv));
+  const bri = Pm.bri * 1.2, temp = Pm.temp * .6, tnt = Pm.tint * .5, sat = 1 + Pm.sat / 100, hi = Pm.hi / 100, sh = Pm.sh / 100, vig = Pm.vig / 100, fade = Pm.fade / 100;
+  const cx = W / 2, cy = H / 2, md = Math.hypot(cx, cy);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = (y * W + x) * 4; let r = d[i], g = d[i + 1], b = d[i + 2];
+    r += bri; g += bri; b += bri;
+    r = cf * (r - 128) + 128; g = cf * (g - 128) + 128; b = cf * (b - 128) + 128;
+    r += temp; b -= temp; g -= tnt;
+    if (hi || sh) { const L = (.299 * r + .587 * g + .114 * b) / 255, add = hi * smoothstep(.45, 1, L) * 60 + sh * (1 - smoothstep(0, .55, L)) * 60; r += add; g += add; b += add; }
+    if (sat !== 1) { const L = .299 * r + .587 * g + .114 * b; r = L + (r - L) * sat; g = L + (g - L) * sat; b = L + (b - L) * sat; }
+    if (fade) { r = r * (1 - fade * .18) + fade * 30; g = g * (1 - fade * .18) + fade * 28; b = b * (1 - fade * .18) + fade * 34; }
+    if (f !== 'none' && k > 0) {
+      let fr = r, fg = g, fb = b; const L = .299 * r + .587 * g + .114 * b;
+      if (f === 'bw') { fr = fg = fb = (L - 128) * 1.1 + 128; }
+      else if (f === 'mono') { const v = (L - 128) * 1.15 + 128; fr = v * .93; fg = v * .98; fb = v * 1.07 + 6; }
+      else if (f === 'sepia') { fr = r * .393 + g * .769 + b * .189; fg = r * .349 + g * .686 + b * .168; fb = r * .272 + g * .534 + b * .131; }
+      else if (f === 'teal') { const t = L / 255 - .5; fr = r + t * 50; fg = g + t * 8; fb = b - t * 50; }
+      else if (f === 'grain') { const nz = ((Math.sin(x * 12.9898 + y * 78.233) * 43758.5453) % 1) * 36; fr = r + nz; fg = g + nz; fb = b + nz; }
+      r += (fr - r) * k; g += (fg - g) * k; b += (fb - b) * k;
+    }
+    if (vig) { const dd = Math.hypot(x - cx, y - cy) / md, m = 1 - vig * dd * dd * .9; r *= m; g *= m; b *= m; }
+    d[i] = r; d[i + 1] = g; d[i + 2] = b;
+  }
+  if (Pm.sharp > 0) {
+    const a = Pm.sharp / 100 * 1.2, src = new Uint8ClampedArray(d);
+    for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { const i = (y * W + x) * 4; for (let c = 0; c < 3; c++) { const v = src[i + c]; d[i + c] = v + a * (4 * v - src[i - 4 + c] - src[i + 4 + c] - src[i - W * 4 + c] - src[i + W * 4 + c]); } }
+  }
+  return id;
+}
+function mixData(base, proc, k) { const a = base.data, b = proc.data; for (let i = 0; i < a.length; i += 4) { b[i] = a[i] + (b[i] - a[i]) * k; b[i + 1] = a[i + 1] + (b[i + 1] - a[i + 1]) * k; b[i + 2] = a[i + 2] + (b[i + 2] - a[i + 2]) * k; } return proc; }
+
+/* ---------- 文字樣式 ---------- */
+const FONTS = { sans: ['黑體', '"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif'], serif: ['明體', '"Noto Serif TC","PMingLiU","Songti TC",serif'], kai: ['手寫', '"LXGW WenKai TC","Kaiti TC","BiauKai","DFKai-SB",serif'], latin: ['英文', '"Noto Serif",Georgia,serif'] };
+const TEXT_STYLES = [
+  { id: 'plain', color: '#ffffff', color2: '#000000' }, { id: 'stroke', color: '#ffffff', color2: '#1d1d1f' }, { id: 'shadow', color: '#ffffff', color2: '#000000' },
+  { id: 'neon', color: '#ffd6f0', color2: '#ff3fa4' }, { id: 'gradient', color: '#ffd23f', color2: '#ff4f8b' }, { id: '3d', color: '#ffd23f', color2: '#b4410c' },
+  { id: 'label', color: '#ffffff', color2: '#ff4d8d' }, { id: 'candy', color: '#ff7ab6', color2: '#7a5cff' }, { id: 'dark', color: '#2b2226', color2: '#ffffff' },
+];
+const measureCtx = mkCanvas(1, 1).getContext('2d');
+function fontOf(t) { return `${t.italic ? 'italic ' : ''}${t.weight} ${t.size}px ${FONTS[t.font][1]}`; }
+function textLayout(t) { measureCtx.font = fontOf(t); const lines = String(t.text || ' ').split('\n'), lh = t.size * 1.25; const ws = lines.map(l => measureCtx.measureText(l || ' ').width); return { lines, lh, w: Math.max(1, ...ws), h: lh * lines.length }; }
+function drawTextObj(ctx, t) {
+  const L = textLayout(t), s = t.size; ctx.save();
+  ctx.font = fontOf(t); ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.lineJoin = 'round'; ctx.miterLimit = 2;
+  const top = t.y - L.h / 2, each = fn => L.lines.forEach((ln, i) => fn(ln, t.x, top + L.lh * (i + .5)));
+  const grad = (c1, c2) => { const g = ctx.createLinearGradient(0, top, 0, top + L.h); g.addColorStop(0, c1); g.addColorStop(1, c2); return g; };
+  switch (t.style) {
+    case 'stroke': ctx.lineWidth = s * .16; ctx.strokeStyle = t.color2; each((l, x, y) => ctx.strokeText(l, x, y)); ctx.fillStyle = t.color; each((l, x, y) => ctx.fillText(l, x, y)); break;
+    case 'dark': ctx.lineWidth = s * .14; ctx.strokeStyle = t.color2; each((l, x, y) => ctx.strokeText(l, x, y)); ctx.fillStyle = t.color; each((l, x, y) => ctx.fillText(l, x, y)); break;
+    case 'shadow': ctx.shadowColor = 'rgba(0,0,0,.55)'; ctx.shadowBlur = s * .18; ctx.shadowOffsetX = s * .05; ctx.shadowOffsetY = s * .07; ctx.fillStyle = t.color; each((l, x, y) => ctx.fillText(l, x, y)); break;
+    case 'neon': ctx.shadowColor = t.color2; ctx.shadowBlur = s * .6; ctx.fillStyle = t.color2; each((l, x, y) => ctx.fillText(l, x, y)); ctx.shadowBlur = s * .22; ctx.fillStyle = t.color; each((l, x, y) => ctx.fillText(l, x, y)); break;
+    case 'gradient': ctx.fillStyle = grad(t.color, t.color2); each((l, x, y) => ctx.fillText(l, x, y)); break;
+    case '3d': { const dp = Math.max(2, Math.round(s * .09)); ctx.fillStyle = t.color2; for (let i = dp; i > 0; i--) each((l, x, y) => ctx.fillText(l, x + i * .7, y + i)); ctx.fillStyle = t.color; each((l, x, y) => ctx.fillText(l, x, y)); break; }
+    case 'label': { const pad = s * .4; ctx.fillStyle = t.color2; ctx.beginPath(); ctx.roundRect(t.x - L.w / 2 - pad, top - pad * .6, L.w + pad * 2, L.h + pad * 1.2, s * .3); ctx.fill(); ctx.fillStyle = t.color; each((l, x, y) => ctx.fillText(l, x, y)); break; }
+    case 'candy': ctx.lineWidth = s * .3; ctx.strokeStyle = t.color2; each((l, x, y) => ctx.strokeText(l, x, y)); ctx.lineWidth = s * .14; ctx.strokeStyle = '#fff'; each((l, x, y) => ctx.strokeText(l, x, y)); ctx.fillStyle = grad('#ffffff', t.color); each((l, x, y) => ctx.fillText(l, x, y)); break;
+    default: ctx.fillStyle = t.color; each((l, x, y) => ctx.fillText(l, x, y));
+  }
+  ctx.restore();
+}
+
+/* ---------- MediaPipe 臉部與人體辨識 ---------- */
+const MP_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const FACE_TASK = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+const POSE_TASK = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+let MP = null, mpFiles = null, faceLM = null, poseLM = null;
+async function mpLoad(task) {
+  if (MP) return MP;
+  task?.status('載入人像辨識元件…');
+  const m = await import(MP_URL); MP = m.FaceLandmarker ? m : (m.default || m);
+  mpFiles = await MP.FilesetResolver.forVisionTasks(MP_URL + '/wasm'); return MP;
+}
+async function mkLM(Cls, path, extra) {
+  const opt = d => ({ baseOptions: { modelAssetPath: path, delegate: d }, runningMode: 'IMAGE', ...extra });
+  try { return await Cls.createFromOptions(mpFiles, opt('GPU')); } catch (e) { console.warn('改用 CPU', e); return await Cls.createFromOptions(mpFiles, opt('CPU')); }
+}
+async function getFaces(task, img = S.img) {
+  if (S.faces && S.faces.src === img) return S.faces.list;
+  await mpLoad(task); task?.check();
+  if (!faceLM) { task?.status('下載臉部模型（約 4 MB，只需一次）…'); faceLM = await mkLM(MP.FaceLandmarker, FACE_TASK, { numFaces: 6 }); }
+  task?.status('辨識臉部…'); await sleep(20);
+  const r = faceLM.detect(fitInto(img, 1280));
+  S.faces = { src: img, list: r.faceLandmarks || [] }; return S.faces.list;
+}
+async function getPose(task) {
+  if (S.pose && S.pose.src === S.img) return S.pose.lm;
+  await mpLoad(task); task?.check();
+  if (!poseLM) { task?.status('下載人體模型（約 6 MB，只需一次）…'); poseLM = await mkLM(MP.PoseLandmarker, POSE_TASK, { numPoses: 1 }); }
+  task?.status('辨識身體…'); await sleep(20);
+  const r = poseLM.detect(fitInto(S.img, 1024));
+  S.pose = { src: S.img, lm: (r.landmarks && r.landmarks[0]) || null }; return S.pose.lm;
+}
+/* ========== 編輯器框架 ========== */
+const TOOLS = {};
+const ICO = {
+  crop: '<path d="M6 2v16h16"/><path d="M2 6h16v16"/>', adjust: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  filter: '<circle cx="9" cy="10" r="5"/><circle cx="15" cy="10" r="5"/><circle cx="12" cy="15" r="5"/>', text: '<path d="M5 7V4h14v3M12 4v16M9 20h6"/>',
+  sticker: '<path d="M14 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h8l7-7V6a3 3 0 0 0-3-3"/><path d="M14 21v-4a3 3 0 0 1 3-3h4"/><circle cx="9" cy="10" r="1"/><circle cx="14" cy="10" r="1"/>',
+  frame: '<rect x="3" y="3" width="18" height="18" rx="2"/><rect x="7" y="7" width="10" height="10"/>', mosaic: '<rect x="4" y="4" width="5" height="5"/><rect x="15" y="4" width="5" height="5"/><rect x="9.5" y="9.5" width="5" height="5"/><rect x="4" y="15" width="5" height="5"/><rect x="15" y="15" width="5" height="5"/>',
+  doodle: '<path d="M4 20c4 0 4-4 8-4s4 4 8 4"/><path d="m14 4 6 6-8 8H6v-6z"/>', erase: '<path d="m15 4 5 5-9 9H6l-3-3z"/><path d="M13 20h8"/>',
+  matte: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1-3.6 3.8-5.5 7-5.5s6 1.9 7 5.5"/><path d="M3 3h3M18 3h3M3 3v3M21 3v3"/>', upscale: '<path d="M4 14v6h6M20 10V4h-6M4 20l6-6M20 4l-6 6"/>',
+  auto: '<path d="M12 3l1.8 4.6L18 9l-4.2 1.4L12 15l-1.8-4.6L6 9l4.2-1.4z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>', smooth: '<circle cx="12" cy="12" r="8"/><path d="M8 12c1.5-2 6.5-2 8 0"/>',
+  whiten: '<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>', acne: '<circle cx="12" cy="12" r="8"/><circle cx="10" cy="10" r="1.3"/><circle cx="14.5" cy="13" r="1"/><path d="M16 4l4 4"/>',
+  dark: '<path d="M3 12c3-4 6-5 9-5s6 1 9 5c-3 4-6 5-9 5s-6-1-9-5"/><path d="M6 18c2 1.5 4 2 6 2s4-.5 6-2"/>', eyes2: '<path d="M2 12c3-5 7-7 10-7s7 2 10 7c-3 5-7 7-10 7s-7-2-10-7"/><circle cx="12" cy="12" r="3"/><path d="M13 11h0"/>',
+  teeth: '<path d="M4 9c2-3 14-3 16 0-1 6-3 10-4 10-2 0-2-5-4-5s-2 5-4 5c-1 0-3-4-4-10"/>', shape: '<path d="M12 3c4.5 0 7 3.5 7 8 0 5-3.5 10-7 10s-7-5-7-10c0-4.5 2.5-8 7-8"/><path d="M8 12l-2 1M16 12l2 1"/>',
+  slim: '<path d="M12 3c4.5 0 7 3.5 7 8 0 5-3.5 10-7 10s-7-5-7-10c0-4.5 2.5-8 7-8"/><path d="m3 13 3 0M21 13h-3"/>', big: '<path d="M2 12c3-5 7-7 10-7s7 2 10 7c-3 5-7 7-10 7s-7-2-10-7"/><circle cx="12" cy="12" r="4.5"/>',
+  nose: '<path d="M12 4v9l-3 4c1.5 1 4.5 1 6 0"/>', lip: '<path d="M3 12c3-4 6-5 9-3 3-2 6-1 9 3-3 5-6 7-9 7s-6-2-9-7"/><path d="M3 12h18"/>',
+  blush: '<circle cx="7" cy="14" r="3.5"/><circle cx="17" cy="14" r="3.5"/><path d="M8 7h0M16 7h0"/>', makeup: '<path d="M9 21h6M10 21V11h4v10M10 11l1-7h2l1 7"/>',
+  body: '<circle cx="12" cy="4.5" r="2"/><path d="M8 22l1-8-2-5h10l-2 5 1 8"/>', waist: '<path d="M7 3c0 6 3 7 3 9s-3 3-3 9M17 3c0 6-3 7-3 9s3 3 3 9"/>', tall: '<circle cx="12" cy="4.5" r="2"/><path d="M12 8v14M8 18l4 4 4-4"/>',
+  collage: '<rect x="3" y="3" width="8" height="18" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/>', poster: '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 7h8M8 11h5"/><rect x="8" y="14" width="8" height="5" rx="1"/>',
+  idphoto: '<rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M7.5 18c.8-2.2 2.5-3.2 4.5-3.2s3.7 1 4.5 3.2"/>',
+};
+const ic = (k, sw = 1.7) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${ICO[k] || ICO.adjust}</svg>`;
+const TABS = {
+  edit: [['crop', '裁剪', 'crop'], ['adjust', '調整', 'adjust'], ['filter', '濾鏡', 'filter'], ['text', '文字', 'text'], ['sticker', '貼紙', 'sticker'], ['frame', '邊框', 'frame'], ['mosaic', '馬賽克', 'mosaic'], ['doodle', '塗鴉', 'doodle'], ['erase', 'AI 消除', 'erase'], ['matte', '摳圖', 'matte'], ['upscale', '變清晰', 'upscale']],
+  beauty: [['auto', '一鍵美顏', 'auto'], ['smooth', '磨皮', 'smooth'], ['whiten', '美白', 'whiten'], ['acne', '祛痘', 'acne'], ['dark', '黑眼圈', 'dark'], ['eyes2', '亮眼', 'eyes2'], ['teeth', '白牙', 'teeth'], ['shape:slim', '瘦臉', 'slim'], ['shape:eyes', '大眼', 'big'], ['shape:nose', '瘦鼻', 'nose'], ['shape', '臉型', 'shape'], ['makeup:lip', '口紅', 'lip'], ['makeup:blush', '腮紅', 'blush'], ['makeup', '美妝', 'makeup'], ['body:slim', '瘦身', 'body'], ['body:waist', '瘦腰', 'waist'], ['body:tall', '增高', 'tall'], ['filter', '濾鏡', 'filter']],
+};
+function renderTabs() {
+  $$('.seg2 button').forEach(b => b.classList.toggle('on', b.dataset.grp === S.grp));
+  $('#eTabs').innerHTML = TABS[S.grp].map(([id, l, k]) => `<button class="tab" data-open="${id}" data-label="${l}"><i>${ic(k)}</i>${l}</button>`).join('');
+  $('#eTabs').scrollLeft = 0;
+}
+$$('.seg2 button').forEach(b => b.onclick = () => { S.grp = b.dataset.grp; renderTabs(); });
+$('#eTabs').addEventListener('click', e => { const b = e.target.closest('[data-open]'); if (b) openTool(b.dataset.open, b.dataset.label); });
+let toolOpening = false;
+async function openTool(spec, label) {
+  if (currentTask || S.tool || toolOpening || !S.img) return;
+  const [id, param] = spec.split(':'), T = TOOLS[id]; if (!T) return;
+  toolOpening = true;
+  try {
+    S.tool = id; S.preview = null; T.param = param;
+    $('#tName').textContent = label || T.name; $('#eMain').hidden = true; $('#eTool').hidden = false;
+    $('#eOpts').innerHTML = T.ui(param); bindSliders($('#eOpts')); T.bind?.($('#eOpts'));
+    updateTop(); resizeEV(); fitView(); hint(T.hint || null);
+    if (T.init) { const ok = await T.init(param); if (ok === false) { closeTool(false); return; } }
+  } finally { toolOpening = false; }
+}
+async function closeTool(apply) {
+  if (!S.tool || currentTask) return; const T = TOOLS[S.tool];
+  if (apply) {
+    const out = T.heavy ? await runTask('套用中', async task => { const r = await T.apply(task); task.check(); return r; }) : await T.apply();
+    if (T.heavy && out === undefined) return; // 取消或失敗：留在工具裡
+    if (out && out !== S.img) { S.tool = null; commit(out); }
+  }
+  T.close?.(); S.tool = null; S.preview = null; pvPend = null;
+  $('#eTool').hidden = true; $('#eMain').hidden = false; hint(null);
+  updateTop(); resizeEV(); fitView();
+}
+$('#tX').onclick = () => closeTool(false);
+$('#tOK').onclick = () => closeTool(true);
+// 預覽排程：滑桿拖動時合併計算
+let pvRun = false, pvPend = null;
+function schedulePreview(fn) {
+  pvPend = fn; if (pvRun) return; pvRun = true;
+  const step = async () => {
+    const f = pvPend; pvPend = null;
+    if (f && S.tool) { try { const c = await f(); if (S.tool && c !== undefined) setPreview(c); } catch (e) { console.error(e); } }
+    if (pvPend) requestAnimationFrame(step); else pvRun = false;
+  };
+  requestAnimationFrame(step);
+}
+function setPreview(c) {
+  const before = shownBase(), bw = before.c.width * before.k, bh = before.c.height * before.k;
+  S.preview = c; const a = shownBase(), aw = a.c.width * a.k, ah = a.c.height * a.k;
+  if (Math.abs(aw - bw) > 2 || Math.abs(ah - bh) > 2) fitView(); else render();
+}
+function procProxy(fn) { const p = proxy(), id = fn(getData(p), p.width, p.height); return asPreview(id instanceof ImageData ? putData(id) : id, pk()); }
+// UI 小工具
+function sl(id, label, min, max, val, step = 1) { return `<div class="sl"><label for="${id}">${label}</label><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${val}"><output>${val}</output></div>`; }
+function bindSliders(root) { $$('.sl input', root).forEach(r => { const o = r.parentElement.querySelector('output'); r.addEventListener('input', () => o.textContent = r.value); }); }
+function chips(items, sel, attr) { return `<div class="chips">${items.map(([v, l]) => `<button class="chip ${String(sel) === String(v) ? 'on' : ''}" data-${attr}="${v}">${l}</button>`).join('')}</div>`; }
+function swatches(colors, sel, attr, extra = '') { return `<div class="chips" style="gap:10px">${extra}${colors.map(c => `<button class="sw ${sel === c ? 'on' : ''}" data-${attr}="${c}" style="background:${c}" aria-label="${c}"></button>`).join('')}</div>`; }
+function on(root, sel, fn) { $$(sel, root).forEach(el => el.addEventListener('click', () => fn(el))); }
+function refreshUI() { const T = TOOLS[S.tool]; if (!T) return; const sc = $('#eOpts').scrollTop; $('#eOpts').innerHTML = T.ui(T.param); bindSliders($('#eOpts')); T.bind?.($('#eOpts')); $('#eOpts').scrollTop = sc; }
+
+/* ========== 美化：裁剪 ========== */
+const CR = {};
+const CR_RATIOS = [['free', '自由'], ['orig', '原比例'], ['1', '1:1'], ['0.75', '3:4'], ['1.3333', '4:3'], ['0.5625', '9:16'], ['1.7778', '16:9']];
+function rot90(c, d) { const o = mkCanvas(c.height, c.width), x = o.getContext('2d'); x.translate(o.width / 2, o.height / 2); x.rotate(d * Math.PI / 2); x.drawImage(c, -c.width / 2, -c.height / 2); return o; }
+function flip(c, h) { const o = mkCanvas(c.width, c.height), x = o.getContext('2d'); if (h) { x.translate(c.width, 0); x.scale(-1, 1); } else { x.translate(0, c.height); x.scale(1, -1); } x.drawImage(c, 0, 0); return o; }
+function innerRect(w, h, a) { const sa = Math.abs(Math.sin(a)), ca = Math.abs(Math.cos(a)); if (sa < 1e-6) return [w, h]; const lo = w >= h, s1 = lo ? h : w, l1 = lo ? w : h; if (s1 <= 2 * sa * ca * l1 || Math.abs(sa - ca) < 1e-10) { const x = .5 * s1; return lo ? [x / sa, x / ca] : [x / ca, x / sa]; } const c2 = ca * ca - sa * sa; return [(w * ca - h * sa) / c2, (h * ca - w * sa) / c2]; }
+function straighten(c, deg) { if (!deg) return c; const a = deg * Math.PI / 180, [iw, ih] = innerRect(c.width, c.height, a), o = mkCanvas(Math.floor(iw), Math.floor(ih)), x = o.getContext('2d'); x.translate(o.width / 2, o.height / 2); x.rotate(a); x.imageSmoothingQuality = 'high'; x.drawImage(c, -c.width / 2, -c.height / 2); return o; }
+function crRatio() { return CR.ratio === 'free' ? null : CR.ratio === 'orig' ? S.img.width / S.img.height : +CR.ratio; }
+function crFit() { const W = CR.work.width, H = CR.work.height, r = crRatio(); if (!r) { CR.rect = { x: 0, y: 0, w: W, h: H }; return; } let w = W, h = w / r; if (h > H) { h = H; w = h * r; } CR.rect = { x: (W - w) / 2, y: (H - h) / 2, w, h }; }
+function crRebuild() { CR.work = straighten(CR.base, CR.angle); crFit(); setPreview(asPreview(CR.work, 1)); }
+TOOLS.crop = {
+  name: '裁剪', touch: true, hint: '拖曳框框四角調整，雙指可縮放畫面',
+  init() { CR.base = S.img; CR.angle = 0; CR.ratio = 'free'; CR.work = S.img; crFit(); setPreview(asPreview(CR.work, 1)); },
+  ui() {
+    return chips(CR_RATIOS, CR.ratio || 'free', 'cr') +
+      `<div class="row"><button class="btn" data-rot="-1">↺ 左轉</button><button class="btn" data-rot="1">↻ 右轉</button><button class="btn" data-flip="1">⇋ 翻轉</button><button class="btn" data-flip="0">⇵ 翻轉</button></div>` +
+      sl('crAng', '拉直', -30, 30, CR.angle || 0, .5);
+  },
+  bind(r) {
+    on(r, '[data-cr]', b => { CR.ratio = b.dataset.cr; crFit(); refreshUI(); render(); });
+    on(r, '[data-rot]', b => { CR.base = rot90(CR.base, +b.dataset.rot); crRebuild(); });
+    on(r, '[data-flip]', b => { CR.base = flip(CR.base, b.dataset.flip === '1'); crRebuild(); });
+    $('#crAng', r).addEventListener('input', e => { CR.angle = +e.target.value; crRebuild(); });
+  },
+  down(p) {
+    const c = CR.rect, t = 28 / S.view.s;
+    const cs = [['tl', c.x, c.y], ['tr', c.x + c.w, c.y], ['bl', c.x, c.y + c.h], ['br', c.x + c.w, c.y + c.h]];
+    const h = cs.find(([, x, y]) => Math.abs(p.x - x) < t && Math.abs(p.y - y) < t);
+    if (h) { CR.d = { m: 'r', ax: h[0].includes('l') ? c.x + c.w : c.x, ay: h[0].includes('t') ? c.y + c.h : c.y }; return true; }
+    if (p.x > c.x && p.x < c.x + c.w && p.y > c.y && p.y < c.y + c.h) { CR.d = { m: 'm', ox: p.x - c.x, oy: p.y - c.y }; return true; }
+    return false;
+  },
+  move(p) {
+    const d = CR.d; if (!d) return; const W = CR.work.width, H = CR.work.height, c = CR.rect;
+    if (d.m === 'm') { c.x = clamp(p.x - d.ox, 0, W - c.w); c.y = clamp(p.y - d.oy, 0, H - c.h); }
+    else {
+      const px = clamp(p.x, 0, W), py = clamp(p.y, 0, H), r = crRatio(); let w = Math.max(20, Math.abs(px - d.ax)), h = Math.max(20, Math.abs(py - d.ay));
+      const sx = px < d.ax ? -1 : 1, sy = py < d.ay ? -1 : 1;
+      if (r) { if (w / h > r) w = h * r; else h = w / r; const mw = sx < 0 ? d.ax : W - d.ax, mh = sy < 0 ? d.ay : H - d.ay; if (w > mw) { w = mw; h = w / r; } if (h > mh) { h = mh; w = h * r; } }
+      CR.rect = { x: sx < 0 ? d.ax - w : d.ax, y: sy < 0 ? d.ay - h : d.ay, w, h };
+    }
+    render();
+  },
+  up() { CR.d = null; },
+  overlay(ctx, s) {
+    const c = CR.rect, W = CR.work.width, H = CR.work.height; if (!c) return;
+    ctx.save(); ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.rect(c.x, c.y, c.w, c.h); ctx.fill('evenodd');
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5 / s; ctx.strokeRect(c.x, c.y, c.w, c.h);
+    ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.lineWidth = 1 / s; ctx.beginPath();
+    for (let i = 1; i < 3; i++) { ctx.moveTo(c.x + c.w * i / 3, c.y); ctx.lineTo(c.x + c.w * i / 3, c.y + c.h); ctx.moveTo(c.x, c.y + c.h * i / 3); ctx.lineTo(c.x + c.w, c.y + c.h * i / 3); } ctx.stroke();
+    const L = 20 / s; ctx.lineWidth = 4 / s; ctx.strokeStyle = '#fff'; ctx.beginPath();
+    [[c.x, c.y, 1, 1], [c.x + c.w, c.y, -1, 1], [c.x, c.y + c.h, 1, -1], [c.x + c.w, c.y + c.h, -1, -1]].forEach(([x, y, dx, dy]) => { ctx.moveTo(x + L * dx, y); ctx.lineTo(x, y); ctx.lineTo(x, y + L * dy); }); ctx.stroke(); ctx.restore();
+  },
+  apply() { const c = CR.rect, x = Math.round(c.x), y = Math.round(c.y), w = Math.round(c.w), h = Math.round(c.h); const o = mkCanvas(w, h); o.getContext('2d').drawImage(CR.work, x, y, w, h, 0, 0, w, h); return o; },
+};
+
+/* ========== 美化：調整 ========== */
+const AD = { p: { ...C0 }, k: 'bri' };
+const AD_LIST = [['bri', '亮度'], ['con', '對比'], ['sat', '飽和'], ['temp', '色溫'], ['tint', '色調'], ['hi', '亮部'], ['sh', '暗部'], ['fade', '褪色'], ['sharp', '銳利'], ['vig', '暗角']];
+TOOLS.adjust = {
+  name: '調整',
+  init() { AD.p = { ...C0 }; AD.k = 'bri'; refreshUI(); },
+  ui() { const k = AD.k, mn = (k === 'sharp' || k === 'fade') ? 0 : -100; return chips(AD_LIST.map(([v, l]) => [v, l + (AD.p[v] ? '•' : '')]), k, 'ak') + sl('adV', AD_LIST.find(a => a[0] === k)[1], mn, 100, AD.p[k]); },
+  bind(r) {
+    on(r, '[data-ak]', b => { AD.k = b.dataset.ak; refreshUI(); });
+    $('#adV', r).addEventListener('input', e => { AD.p[AD.k] = +e.target.value; schedulePreview(() => procProxy(id => colorProcess(id, AD.p))); });
+  },
+  apply() { if (Object.values(AD.p).every(v => !v)) return null; const id = colorProcess(getData(S.img), AD.p); return putData(id); },
+};
+
+/* ========== 美化／美容：濾鏡 ========== */
+const FILTERS = [
+  ['none', '原圖', {}, 'none'], ['fresh', '清新', { bri: 8, con: -6, sat: -6, temp: -12, hi: -8 }, 'none'], ['cream', '奶油', { bri: 10, con: -12, sat: -16, temp: 14, tint: 4, fade: 25 }, 'none'],
+  ['japan', '日系', { bri: 14, con: -16, sat: -18, temp: -10, sh: 20 }, 'none'], ['pink', '粉嫩', { bri: 8, tint: 16, temp: 6, sat: 6, con: -6 }, 'none'], ['cold', '冷白', { bri: 10, temp: -26, sat: -10, con: 6 }, 'none'],
+  ['warm', '暖陽', { temp: 28, sat: 10, bri: 4 }, 'none'], ['film', '膠片', { con: 12, sat: -10, temp: 10, vig: 20, fade: 15 }, 'grain'], ['retro', '復古', { con: -6, sat: -25, temp: 24, vig: 28, fade: 30 }, 'none'],
+  ['forest', '森系', { temp: -6, tint: -10, sat: -12, con: -4, sh: 10 }, 'none'], ['hk', '港風', { con: 18, sat: 14, temp: 16, tint: 6, vig: 22 }, 'teal'], ['teal', '青橙', { con: 8 }, 'teal'],
+  ['vivid', '鮮豔', { con: 12, sat: 30, sharp: 15 }, 'none'], ['bw', '黑白', {}, 'bw'], ['mono', '冷黑白', { con: 8 }, 'mono'],
+];
+const FL = { id: 'none', k: 80, thumbs: null, thumbSrc: null };
+function filterRun(id, def, k) { const base = new ImageData(new Uint8ClampedArray(id.data), id.width, id.height); colorProcess(id, def[2], def[3], 100); return mixData(base, id, k / 100); }
+TOOLS.filter = {
+  name: '濾鏡',
+  init() {
+    FL.id = 'none'; FL.k = 80;
+    if (FL.thumbSrc !== S.img) {
+      const p = proxy(), m = Math.min(p.width, p.height), t = mkCanvas(128, 128);
+      t.getContext('2d').drawImage(p, (p.width - m) / 2, (p.height - m) / 2, m, m, 0, 0, 128, 128);
+      FL.thumbs = FILTERS.map(def => { const id = getData(t); filterRun(id, def, 100); return putData(id); }); FL.thumbSrc = S.img;
+    }
+    refreshUI();
+  },
+  ui() { return `<div class="thumbs">${FILTERS.map((f, i) => `<button class="th ${FL.id === f[0] ? 'on' : ''}" data-fi="${i}"><canvas width="128" height="128" data-ti="${i}"></canvas>${f[1]}</button>`).join('')}</div>` + (FL.id !== 'none' ? sl('flK', '強度', 0, 100, FL.k) : ''); },
+  bind(r) {
+    if (FL.thumbs) $$('canvas[data-ti]', r).forEach(c => c.getContext('2d').drawImage(FL.thumbs[+c.dataset.ti], 0, 0));
+    on(r, '[data-fi]', b => { FL.id = FILTERS[+b.dataset.fi][0]; refreshUI(); this.pv(); });
+    $('#flK', r)?.addEventListener('input', e => { FL.k = +e.target.value; this.pv(); });
+  },
+  pv() { const def = FILTERS.find(f => f[0] === FL.id); if (FL.id === 'none') { setPreview(null); return; } schedulePreview(() => procProxy(id => filterRun(id, def, FL.k))); },
+  apply() { if (FL.id === 'none') return null; const def = FILTERS.find(f => f[0] === FL.id); return putData(filterRun(getData(S.img), def, FL.k)); },
+};
+
+/* ========== 物件層（文字、貼紙） ========== */
+const OBJ = { list: [], sel: null };
+const EMOJI = {
+  '可愛': '🥰😍😘🤭🥺😊😚🙈🐰🐻🐱🐶🦄🐥🌈⭐✨💫🎀🍓🍒🧸🎈🫧',
+  '愛心': '❤️🩷🧡💛💚🩵💙💜🤍🖤💖💗💓💞💕💘💝❣️💌😻🫶💋🌹💐',
+  '表情': '😀😆😂🤣😉😎🤩🥳😜🤪😏😴😭😤😱🤯🫠🤔🙃😇🥹😋🤤🫣',
+  '動物': '🐰🐻🐼🐨🐯🦊🐱🐶🐹🐭🐷🐸🐵🐧🐤🦋🐝🐞🐬🐳🦭🦦🦥🐾',
+  '美食': '🍓🍑🍒🍉🍋🍰🧁🍩🍪🍫🍦🍧🍡🍭🍬🧋☕🍵🍔🍟🍕🍣🍜🥐',
+  '節日': '🎂🎉🎊🎁🎄🎅🎃👻🧧🏮🎆🎇💐🌸🌷🌻🍀🌙☀️❄️⛄🎓💍👑',
+};
+function objHalf(o) { if (o.type === 'sticker') return { w: o.size * .62, h: o.size * .62 }; const L = textLayout({ ...o, x: 0, y: 0 }), pad = o.size * (o.style === 'label' ? .5 : .25); return { w: L.w / 2 + pad, h: L.h / 2 + pad }; }
+function drawObj(ctx, o) {
+  ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(o.r); ctx.scale(o.s, o.s);
+  if (o.type === 'sticker') { ctx.font = `${o.size}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(o.ch, 0, o.size * .04); }
+  else drawTextObj(ctx, { ...o, x: 0, y: 0 });
+  ctx.restore();
+}
+function toLocal(o, p) { const dx = p.x - o.x, dy = p.y - o.y, c = Math.cos(-o.r), s = Math.sin(-o.r); return { x: (dx * c - dy * s) / o.s, y: (dx * s + dy * c) / o.s }; }
+function toWorld(o, q) { const c = Math.cos(o.r), s = Math.sin(o.r); return { x: o.x + (q.x * c - q.y * s) * o.s, y: o.y + (q.x * s + q.y * c) * o.s }; }
+const objSel = () => OBJ.list.find(o => o.id === OBJ.sel);
+const objTool = {
+  touch: true,
+  down(p) {
+    const vs = S.view.s, sel = objSel();
+    if (sel) {
+      const h = objHalf(sel), del = toWorld(sel, { x: -h.w, y: -h.h }), rs = toWorld(sel, { x: h.w, y: h.h });
+      if (dist(p, del) < 22 / vs) { OBJ.list = OBJ.list.filter(o => o !== sel); OBJ.sel = null; render(); refreshUI(); OBJ.d = null; return true; }
+      if (dist(p, rs) < 24 / vs) { OBJ.d = { m: 'rs', o: sel, d0: dist(p, sel), a0: Math.atan2(p.y - sel.y, p.x - sel.x), s0: sel.s, r0: sel.r }; return true; }
+    }
+    for (let i = OBJ.list.length - 1; i >= 0; i--) {
+      const o = OBJ.list[i], q = toLocal(o, p), h = objHalf(o);
+      if (Math.abs(q.x) <= h.w && Math.abs(q.y) <= h.h) { const ch = OBJ.sel !== o.id; OBJ.sel = o.id; OBJ.d = { m: 'mv', o, ox: p.x - o.x, oy: p.y - o.y }; render(); if (ch) refreshUI(); return true; }
+    }
+    if (OBJ.sel) { OBJ.sel = null; render(); refreshUI(); }
+    return false;
+  },
+  move(p) {
+    const d = OBJ.d; if (!d) return;
+    if (d.m === 'mv') { d.o.x = p.x - d.ox; d.o.y = p.y - d.oy; }
+    else { d.o.s = clamp(d.s0 * dist(p, d.o) / Math.max(1, d.d0), .1, 20); d.o.r = d.r0 + Math.atan2(p.y - d.o.y, p.x - d.o.x) - d.a0; }
+    render();
+  },
+  up() { OBJ.d = null; },
+  overlay(ctx, s) {
+    OBJ.list.forEach(o => drawObj(ctx, o));
+    const o = objSel(); if (!o) return; const h = objHalf(o);
+    ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(o.r); ctx.scale(o.s, o.s);
+    ctx.lineWidth = 1.5 / s / o.s; ctx.strokeStyle = '#fff'; ctx.setLineDash([6 / s / o.s, 4 / s / o.s]); ctx.strokeRect(-h.w, -h.h, h.w * 2, h.h * 2); ctx.restore();
+    const del = toWorld(o, { x: -h.w, y: -h.h }), rs = toWorld(o, { x: h.w, y: h.h }), r = 12 / s;
+    ctx.save(); ctx.fillStyle = '#ff4d8d'; ctx.beginPath(); ctx.arc(del.x, del.y, r, 0, 7); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 / s; ctx.beginPath(); ctx.moveTo(del.x - r * .4, del.y - r * .4); ctx.lineTo(del.x + r * .4, del.y + r * .4); ctx.moveTo(del.x + r * .4, del.y - r * .4); ctx.lineTo(del.x - r * .4, del.y + r * .4); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(rs.x, rs.y, r, 0, 7); ctx.fill(); ctx.strokeStyle = '#ff4d8d'; ctx.beginPath(); ctx.arc(rs.x, rs.y, r * .5, -.5, 4.2); ctx.stroke(); ctx.restore();
+  },
+  apply() { if (!OBJ.list.length) return null; const c = cloneCanvas(S.img), x = c.getContext('2d'); OBJ.list.forEach(o => drawObj(x, o)); return c; },
+  close() { OBJ.list = []; OBJ.sel = null; },
+};
+function addObj(o) { const W = S.img.width, H = S.img.height; Object.assign(o, { id: Math.random(), x: W / 2 + (OBJ.list.length % 4) * W * .04, y: H / 2 + (OBJ.list.length % 4) * H * .04, s: 1, r: 0 }); OBJ.list.push(o); OBJ.sel = o.id; render(); refreshUI(); }
+const TCOLORS = ['#ffffff', '#221c20', '#ff4d8d', '#ff8fb1', '#ffd23f', '#7ad3ff', '#8f7cff', '#6fcf97', '#ff7043'];
+TOOLS.text = {
+  ...objTool, name: '文字', hint: '拖曳移動，拉右下角圓點縮放旋轉',
+  init() { if (!OBJ.list.length) this.add(); },
+  add() { const base = Math.min(S.img.width, S.img.height); addObj({ type: 'text', text: '點這裡輸入文字', size: Math.round(base * .08), weight: 900, font: 'sans', style: 'stroke', color: '#ffffff', color2: '#1d1d1f' }); document.fonts?.load(fontOf(objSel())).then(render).catch(() => { }); setTimeout(() => { const t = $('#txIn'); t?.focus(); t?.select(); }, 60); },
+  ui() {
+    const o = objSel(); if (!o || o.type !== 'text') return `<button class="btn main" id="txAdd" style="width:100%">＋ 新增文字</button><p class="note">點畫面上的文字可以選取編輯。</p>`;
+    return `<textarea class="tx" id="txIn" rows="2">${o.text.replace(/</g, '&lt;')}</textarea>
+      <div class="tstyles">${TEXT_STYLES.map(st => `<button class="${o.style === st.id ? 'on' : ''}" data-ts="${st.id}"><canvas width="120" height="56" data-tp="${st.id}"></canvas></button>`).join('')}</div>
+      ${chips(Object.entries(FONTS).map(([k, v]) => [k, v[0]]), o.font, 'tf')}
+      ${swatches(TCOLORS, o.color, 'tc')}
+      <div class="row"><button class="btn" id="txAdd">＋ 再加一段</button></div>`;
+  },
+  bind(r) {
+    $('#txAdd', r) && ($('#txAdd', r).onclick = () => this.add());
+    const o = objSel(); if (!o || o.type !== 'text') return;
+    $$('canvas[data-tp]', r).forEach(c => { const st = TEXT_STYLES.find(s => s.id === c.dataset.tp); drawTextObj(c.getContext('2d'), { text: '花字', x: 60, y: 28, size: 30, weight: 900, font: 'sans', style: st.id, color: st.color, color2: st.color2 }); });
+    $('#txIn', r).addEventListener('input', e => { o.text = e.target.value || ' '; render(); });
+    on(r, '[data-ts]', b => { const st = TEXT_STYLES.find(s => s.id === b.dataset.ts); o.style = st.id; o.color = st.color; o.color2 = st.color2; render(); refreshUI(); });
+    on(r, '[data-tf]', b => { o.font = b.dataset.tf; o.italic = o.font === 'latin'; document.fonts?.load(fontOf(o)).then(render).catch(() => { }); render(); refreshUI(); });
+    on(r, '[data-tc]', b => { o.color = b.dataset.tc; render(); refreshUI(); });
+  },
+};
+const ST = { cat: '可愛' };
+TOOLS.sticker = {
+  ...objTool, name: '貼紙', hint: '拖曳移動，拉右下角圓點縮放旋轉',
+  ui() { return chips(Object.keys(EMOJI).map(k => [k, k]), ST.cat, 'ec') + `<div class="emo">${[...new Intl.Segmenter().segment(EMOJI[ST.cat])].map(g => `<button data-em="${g.segment}">${g.segment}</button>`).join('')}</div>`; },
+  bind(r) {
+    on(r, '[data-ec]', b => { ST.cat = b.dataset.ec; refreshUI(); });
+    on(r, '[data-em]', b => addObj({ type: 'sticker', ch: b.dataset.em, size: Math.round(Math.min(S.img.width, S.img.height) * .22) }));
+  },
+};
+if (!Intl.Segmenter) Intl.Segmenter = class { segment(s) { return Array.from(s).map(x => ({ segment: x })); } };
+
+/* ========== 美化：邊框 ========== */
+const FRAMES = [['none', '無'], ['white', '白邊'], ['polaroid', '拍立得'], ['round', '圓角'], ['film', '底片'], ['black', '黑邊'], ['pink', '粉漾'], ['scrap', '手帳'], ['mag', '雜誌']];
+const FR = { id: 'none' };
+function makeFrame(src, id) {
+  const W = src.width, H = src.height, m = Math.min(W, H);
+  const box = (pl, pt, pr, pb, bg) => { const o = mkCanvas(W + pl + pr, H + pt + pb), x = o.getContext('2d'); if (bg) { x.fillStyle = bg; x.fillRect(0, 0, o.width, o.height); } return [o, x]; };
+  if (id === 'white') { const p = m * .05, [o, x] = box(p, p, p, p, '#fff'); x.drawImage(src, p, p); return o; }
+  if (id === 'black') { const p = m * .045, [o, x] = box(p, p, p, p, '#111'); x.drawImage(src, p, p); return o; }
+  if (id === 'polaroid') { const p = m * .06, [o, x] = box(p, p, p, m * .26, '#fbfaf7'); x.drawImage(src, p, p); x.fillStyle = '#3a3236'; x.font = `${m * .07}px "LXGW WenKai TC",cursive`; x.textAlign = 'center'; x.textBaseline = 'middle'; const d = new Date(); x.fillText(`${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`, o.width / 2, p + H + m * .13); return o; }
+  if (id === 'round') { const p = m * .06, [o, x] = box(p, p, p, p, '#f6f1f3'); x.save(); x.shadowColor = 'rgba(0,0,0,.18)'; x.shadowBlur = m * .03; x.shadowOffsetY = m * .01; x.beginPath(); x.roundRect(p, p, W, H, m * .06); x.fillStyle = '#fff'; x.fill(); x.restore(); x.save(); x.beginPath(); x.roundRect(p, p, W, H, m * .06); x.clip(); x.drawImage(src, p, p); x.restore(); return o; }
+  if (id === 'pink') { const p = m * .07, [o, x] = box(p, p, p, p); const g = x.createLinearGradient(0, 0, o.width, o.height); g.addColorStop(0, '#ffc2d8'); g.addColorStop(1, '#cdbfff'); x.fillStyle = g; x.fillRect(0, 0, o.width, o.height); x.save(); x.beginPath(); x.roundRect(p, p, W, H, m * .05); x.clip(); x.drawImage(src, p, p); x.restore(); x.fillStyle = '#fff'; for (let i = 0; i < 18; i++) { const a = i * 2.4, rx = (Math.sin(a * 3.1) * .5 + .5) * o.width, ry = (Math.cos(a * 1.7) * .5 + .5) * o.height; if (rx > p && rx < p + W && ry > p && ry < p + H) continue; x.globalAlpha = .7; x.beginPath(); x.arc(rx, ry, m * (.006 + (i % 3) * .004), 0, 7); x.fill(); } return o; }
+  if (id === 'film') { const p = m * .03, band = m * .1, [o, x] = box(p, band, p, band, '#151214'); x.drawImage(src, p, band); x.fillStyle = '#efe7da'; const hw = m * .035, hh = band * .38, step = hw * 2; for (let xx = step / 2; xx < o.width; xx += step) { x.beginPath(); x.roundRect(xx, (band - hh) / 2, hw, hh, hh * .25); x.fill(); x.beginPath(); x.roundRect(xx, o.height - band + (band - hh) / 2, hw, hh, hh * .25); x.fill(); } return o; }
+  if (id === 'scrap') { const p = m * .08, [o, x] = box(p, p, p, p, '#fff8ee'); x.save(); x.translate(o.width / 2, o.height / 2); x.rotate(-.015); x.fillStyle = '#fff'; x.shadowColor = 'rgba(0,0,0,.15)'; x.shadowBlur = m * .02; x.fillRect(-W / 2 - p * .3, -H / 2 - p * .3, W + p * .6, H + p * .6); x.shadowBlur = 0; x.drawImage(src, -W / 2, -H / 2); x.restore(); x.fillStyle = 'rgba(255,170,200,.75)'; [[p * 1.2, p * .55, -.5], [o.width - p * 1.2, p * .55, .5]].forEach(([tx, ty, a]) => { x.save(); x.translate(tx, ty); x.rotate(a); x.fillRect(-m * .1, -m * .025, m * .2, m * .05); x.restore(); }); x.setLineDash([m * .02, m * .015]); x.strokeStyle = '#e8a5bd'; x.lineWidth = m * .006; x.strokeRect(p * .35, p * .35, o.width - p * .7, o.height - p * .7); return o; }
+  if (id === 'mag') { const [o, x] = box(0, 0, 0, 0); x.drawImage(src, 0, 0); const g = x.createLinearGradient(0, 0, 0, H * .3); g.addColorStop(0, 'rgba(0,0,0,.35)'); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(0, 0, W, H * .3); x.fillStyle = '#fff'; x.textAlign = 'center'; x.font = `italic 900 ${W * .2}px "Noto Serif",Georgia,serif`; x.textBaseline = 'top'; x.fillText('POCHI', W / 2, H * .03); x.font = `700 ${W * .032}px "Noto Sans TC",sans-serif`; x.textAlign = 'left'; x.fillText('今日穿搭 · 春日限定', W * .05, H * .86); x.font = `500 ${W * .026}px "Noto Sans TC",sans-serif`; x.fillText(`ISSUE ${new Date().getMonth() + 1}`, W * .05, H * .91); return o; }
+  return src;
+}
+TOOLS.frame = {
+  name: '邊框',
+  init() { FR.id = 'none'; },
+  ui() { return chips(FRAMES, FR.id, 'fr'); },
+  bind(r) { on(r, '[data-fr]', b => { FR.id = b.dataset.fr; refreshUI(); if (FR.id === 'none') return setPreview(null); schedulePreview(() => asPreview(makeFrame(proxy(), FR.id), pk())); }); },
+  apply() { return FR.id === 'none' ? null : makeFrame(S.img, FR.id); },
+};
+
+/* ========== 筆刷共用 ========== */
+function stampLine(ctx, a, b, r, fn) {
+  ctx.save(); ctx.beginPath(); const d = dist(a, b), n = Math.max(1, Math.ceil(d / (r * .4)));
+  for (let i = 0; i <= n; i++) { const t = i / n, x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t; ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, 7); }
+  ctx.clip(); fn(); ctx.restore();
+}
+/* ========== 美化：馬賽克 ========== */
+const MO = { mode: 'pix', size: 36 };
+function pixelate(src, block) { const w = Math.max(1, Math.round(src.width / block)), h = Math.max(1, Math.round(src.height / block)); const s = mkCanvas(w, h), sx = s.getContext('2d'); sx.drawImage(src, 0, 0, w, h); const o = mkCanvas(src.width, src.height), ox = o.getContext('2d'); ox.imageSmoothingEnabled = false; ox.drawImage(s, 0, 0, o.width, o.height); return o; }
+function softBlur(src, k) { const s = resizeCanvas(src, Math.max(1, Math.round(src.width / k)), Math.max(1, Math.round(src.height / k))); const o = mkCanvas(src.width, src.height), x = o.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(s, 0, 0, o.width, o.height); return o; }
+TOOLS.mosaic = {
+  name: '馬賽克', touch: true, hint: '用手指塗抹要遮住的地方',
+  init() { MO.base = S.img; MO.work = cloneCanvas(S.img); MO.fx = {}; setPreview(asPreview(MO.work, 1)); },
+  fx() { const m = Math.min(S.img.width, S.img.height); if (MO.mode === 'pix') return MO.fx.pix ||= pixelate(MO.base, Math.max(8, m / 40)); if (MO.mode === 'blur') return MO.fx.blur ||= softBlur(MO.base, Math.max(6, m / 60)); return MO.base; },
+  ui() { return chips([['pix', '馬賽克'], ['blur', '模糊'], ['erase', '橡皮擦']], MO.mode, 'mm') + sl('moS', '大小', 10, 120, MO.size); },
+  bind(r) { on(r, '[data-mm]', b => { MO.mode = b.dataset.mm; refreshUI(); }); $('#moS', r).addEventListener('input', e => MO.size = +e.target.value); },
+  down(p) { MO.last = p; this.move(p); return true; },
+  move(p) { const fx = this.fx(), x = MO.work.getContext('2d'); stampLine(x, MO.last, p, MO.size / 2 / S.view.s, () => x.drawImage(fx, 0, 0)); MO.last = p; render(); },
+  up() { },
+  apply() { return MO.work; },
+  close() { MO.fx = {}; MO.work = null; },
+};
+/* ========== 美化：塗鴉 ========== */
+const DO = { pen: 'pen', color: '#ff4d8d', size: 12 };
+const DCOLORS = ['#ff4d8d', '#ffffff', '#221c20', '#ffd23f', '#7ad3ff', '#8f7cff', '#6fcf97', '#ff7043', '#ffb3c7'];
+TOOLS.doodle = {
+  name: '塗鴉', touch: true, hint: '用手指畫，雙指可縮放畫面',
+  init() { DO.base = S.img; DO.work = cloneCanvas(S.img); setPreview(asPreview(DO.work, 1)); },
+  ui() { return chips([['pen', '畫筆'], ['hl', '螢光筆'], ['neon', '霓虹'], ['erase', '橡皮擦']], DO.pen, 'dp') + swatches(DCOLORS, DO.color, 'dc') + sl('doS', '粗細', 2, 60, DO.size); },
+  bind(r) { on(r, '[data-dp]', b => { DO.pen = b.dataset.dp; refreshUI(); }); on(r, '[data-dc]', b => { DO.color = b.dataset.dc; refreshUI(); }); $('#doS', r).addEventListener('input', e => DO.size = +e.target.value); },
+  down(p) { DO.pts = [p]; DO.stroke = mkCanvas(DO.work.width, DO.work.height); this.move(p); return true; },
+  move(p) {
+    const lw = DO.size / S.view.s * (DO.pen === 'hl' ? 2.2 : 1);
+    if (DO.pen === 'erase') { const x = DO.work.getContext('2d'); stampLine(x, DO.pts[DO.pts.length - 1], p, lw, () => x.drawImage(DO.base, 0, 0)); DO.pts.push(p); render(); return; }
+    DO.pts.push(p); const x = DO.stroke.getContext('2d'); x.clearRect(0, 0, DO.stroke.width, DO.stroke.height);
+    x.lineCap = x.lineJoin = 'round'; x.lineWidth = lw; x.strokeStyle = DO.color;
+    if (DO.pen === 'neon') { x.shadowColor = DO.color; x.shadowBlur = lw * 1.6; }
+    x.beginPath(); x.moveTo(DO.pts[0].x, DO.pts[0].y); for (let i = 1; i < DO.pts.length; i++) { const a = DO.pts[i - 1], b = DO.pts[i]; x.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2); } x.lineTo(p.x + .01, p.y); x.stroke();
+    if (DO.pen === 'neon') { x.shadowBlur = 0; x.lineWidth = lw * .35; x.strokeStyle = '#fff'; x.stroke(); }
+    render();
+  },
+  up() { if (DO.pen !== 'erase' && DO.stroke) { const x = DO.work.getContext('2d'); x.save(); if (DO.pen === 'hl') { x.globalAlpha = .45; x.globalCompositeOperation = 'multiply'; } x.drawImage(DO.stroke, 0, 0); x.restore(); } DO.stroke = null; render(); },
+  overlay(ctx) { if (DO.stroke) { ctx.save(); if (DO.pen === 'hl') { ctx.globalAlpha = .45; ctx.globalCompositeOperation = 'multiply'; } ctx.drawImage(DO.stroke, 0, 0); ctx.restore(); } },
+  apply() { return DO.work; },
+  close() { DO.work = DO.stroke = null; },
+};
+/* ========== 美化：AI 消除 ========== */
+const ER = { size: 36 };
+TOOLS.erase = {
+  name: 'AI 消除', touch: true, hint: '塗抹要消除的東西，放開就會自動消除',
+  init() { ER.work = S.img; setPreview(asPreview(ER.work, 1)); },
+  ui() { return sl('erS', '筆刷', 12, 120, ER.size) + `<p class="note">小東西一次塗完；大東西分幾次小範圍塗，效果比較好。第一次使用會下載 AI 模型（約 28 MB）。</p>`; },
+  bind(r) { $('#erS', r).addEventListener('input', e => ER.size = +e.target.value); },
+  down(p) { ER.mask = mkCanvas(ER.work.width, ER.work.height); ER.last = p; this.move(p); return true; },
+  move(p) { const x = ER.mask.getContext('2d'); x.strokeStyle = '#fff'; x.lineCap = x.lineJoin = 'round'; x.lineWidth = ER.size / S.view.s; x.beginPath(); x.moveTo(ER.last.x, ER.last.y); x.lineTo(p.x + .01, p.y); x.stroke(); ER.last = p; render(); },
+  up(p, cancel) {
+    const m = ER.mask; ER.mask = null; if (!m || cancel) { render(); return; }
+    runTask('AI 消除中', async task => { const out = await inpaintImage(ER.work, m, task); task.check(); if (out) { ER.work = out; setPreview(asPreview(out, 1)); } }).finally(render);
+  },
+  overlay(ctx) { if (ER.mask) { ctx.save(); ctx.globalAlpha = .5; ctx.drawImage(tintMask(ER.mask, '#ff4d8d'), 0, 0); ctx.restore(); } },
+  apply() { return ER.work === S.img ? null : ER.work; },
+};
+let _tint = null;
+function tintMask(m, col) { if (!_tint || _tint.width !== m.width || _tint.height !== m.height) _tint = mkCanvas(m.width, m.height); const x = _tint.getContext('2d'); x.globalCompositeOperation = 'source-over'; x.clearRect(0, 0, m.width, m.height); x.drawImage(m, 0, 0); x.globalCompositeOperation = 'source-in'; x.fillStyle = col; x.fillRect(0, 0, m.width, m.height); x.globalCompositeOperation = 'source-over'; return _tint; }
+/* ========== 美化：摳圖 ========== */
+const MT = { kind: 'modnet', bg: 'none', color: '#ffffff', img: null };
+const MT_BG = ['#ffffff', '#ffe3ee', '#e8f1ff', '#fff4d6', '#e9ffe9', '#222222', '#ff4d8d', '#4f7cff'];
+function matteCompose() {
+  const W = S.img.width, H = S.img.height, out = mkCanvas(W, H), x = out.getContext('2d');
+  if (MT.bg === 'color') { x.fillStyle = MT.color; x.fillRect(0, 0, W, H); }
+  else if (MT.bg === 'blur') x.drawImage(softBlur(S.img, Math.max(8, Math.min(W, H) / 40)), 0, 0);
+  else if (MT.bg === 'img' && MT.img) { const im = MT.img, k = Math.max(W / im.width, H / im.height); x.drawImage(im, (W - im.width * k) / 2, (H - im.height * k) / 2, im.width * k, im.height * k); }
+  x.drawImage(MT.fg, 0, 0); return out;
+}
+TOOLS.matte = {
+  name: '摳圖',
+  async init() { MT.bg = 'none'; return this.run(); },
+  async run() {
+    const ok = await runTask('AI 摳圖中', async task => {
+      const r = await segment(S.img, MT.kind, task); task.check();
+      const W = S.img.width, H = S.img.height, mc = maskToCanvas(r.mask, r.w, r.h), fg = cloneCanvas(S.img), x = fg.getContext('2d');
+      x.globalCompositeOperation = 'destination-in'; x.imageSmoothingQuality = 'high'; x.drawImage(mc, 0, 0, W, H);
+      MT.fg = fg; return true;
+    });
+    if (!ok) return false; setPreview(asPreview(matteCompose(), 1)); refreshUI();
+  },
+  ui() {
+    return chips([['modnet', '人像'], ['u2netp', '物品'], ['u2net', '物品（精細）']], MT.kind, 'mk') +
+      `<div class="chips" style="gap:10px"><button class="sw trans ${MT.bg === 'none' ? 'on' : ''}" data-mb="none" aria-label="透明"></button>${MT_BG.map(c => `<button class="sw ${MT.bg === 'color' && MT.color === c ? 'on' : ''}" data-mc="${c}" style="background:${c}"></button>`).join('')}</div>
+      <div class="row"><button class="btn ${MT.bg === 'blur' ? 'main' : ''}" data-mb="blur">模糊背景</button><button class="btn ${MT.bg === 'img' ? 'main' : ''}" id="mtImg">換成照片</button></div>
+      <p class="note">透明背景按右上角「儲存」會存成 PNG。</p>`;
+  },
+  bind(r) {
+    on(r, '[data-mk]', b => { if (MT.kind === b.dataset.mk) return; MT.kind = b.dataset.mk; refreshUI(); this.run(); });
+    on(r, '[data-mb]', b => { MT.bg = b.dataset.mb; refreshUI(); MT.fg && setPreview(asPreview(matteCompose(), 1)); });
+    on(r, '[data-mc]', b => { MT.bg = 'color'; MT.color = b.dataset.mc; refreshUI(); MT.fg && setPreview(asPreview(matteCompose(), 1)); });
+    $('#mtImg', r).onclick = () => { pickFile('#fBg').then(async f => { if (!f) return; MT.img = await loadPhoto(f); MT.bg = 'img'; refreshUI(); setPreview(asPreview(matteCompose(), 1)); }); };
+  },
+  apply() { return MT.fg ? matteCompose() : null; },
+  close() { MT.fg = null; },
+};
+/* ========== 美化：變清晰 ========== */
+const UP = { model: 'esr_fast', scale: 2, result: null };
+TOOLS.upscale = {
+  name: '變清晰',
+  init() { UP.result = null; },
+  ui() {
+    const W = S.img.width, H = S.img.height, ow = W * UP.scale, oh = H * UP.scale, big = ow * oh > MAX_AREA;
+    return chips([['esr_fast', '一般照片'], ['esr_std', '細節加強'], ['esr_art', '插畫動漫']], UP.model, 'um') + chips([[2, '2 倍'], [4, '4 倍']], UP.scale, 'us') +
+      `<p class="note">${UP.result ? `完成：${UP.result.width} × ${UP.result.height}，按住右下角圓鈕可比較。` : `${W}×${H} → ${ow}×${oh}${big ? '：太大了，手機放不下，請選 2 倍' : ''}`}</p>
+      <button class="btn main" id="upGo" style="width:100%" ${big ? 'disabled' : ''}>${UP.result ? '重新處理' : '開始變清晰'}</button>`;
+  },
+  bind(r) {
+    on(r, '[data-um]', b => { UP.model = b.dataset.um; refreshUI(); });
+    on(r, '[data-us]', b => { UP.scale = +b.dataset.us; refreshUI(); });
+    $('#upGo', r).onclick = () => runTask('AI 變清晰中', async task => { const out = await aiUpscale(S.img, UP.model, UP.scale, task); task.check(); UP.result = out; setPreview(asPreview(out, S.img.width / out.width)); refreshUI(); });
+  },
+  apply() { return UP.result; },
+  close() { UP.result = null; },
+};
+/* ========== 人像美容 ========== */
+async function needFaces(optional) {
+  const faces = await runTask('辨識臉部', task => getFaces(task));
+  if (faces === undefined) return false;
+  if (!faces.length) { if (optional) { toast('沒有找到臉，會套用在整張照片的膚色上'); return []; } toast('找不到臉，請換一張正面、清楚的照片', 'err'); return false; }
+  return faces;
+}
+// 單一滑桿的美顏工具
+function beautyTool(name, def, fn, { optional = false, note = '' } = {}) {
+  const st = { v: def };
+  return {
+    name, heavy: true,
+    async init() { st.v = def; const f = await needFaces(optional); if (f === false) return false; st.faces = f; refreshUI(); this.pv(); },
+    ui() { return sl('bV', '程度', 0, 100, st.v) + (note ? `<p class="note">${note}</p>` : ''); },
+    bind(r) { $('#bV', r).addEventListener('input', e => { st.v = +e.target.value; this.pv(); }); },
+    pv() { schedulePreview(() => procProxy((id) => fn(id, st.faces || [], st.v / 100))); },
+    async apply(task) { if (!st.v) return null; task.status('處理原尺寸照片…'); await sleep(30); return putData(fn(getData(S.img), st.faces || [], st.v / 100)); },
+  };
+}
+TOOLS.smooth = beautyTool('磨皮', 55, bSmooth, { optional: true });
+TOOLS.whiten = beautyTool('美白', 40, bWhiten, { optional: true });
+TOOLS.dark = beautyTool('黑眼圈', 60, bDarkCircle);
+TOOLS.eyes2 = beautyTool('亮眼', 55, bBrightEyes);
+TOOLS.teeth = beautyTool('白牙', 60, bTeeth, { note: '要有露出牙齒的笑容才看得出效果。' });
+
+/* 一鍵美顏 */
+const AU_STYLES = [['natural', '自然', { sm: .45, wh: .25, dk: .4, ey: .3, slim: .2, big: .15 }], ['clear', '清透', { sm: .6, wh: .45, dk: .5, ey: .4, slim: .25, big: .2 }], ['fine', '精緻', { sm: .7, wh: .35, dk: .6, ey: .55, slim: .4, big: .35, small: .2 }], ['goddess', '女神', { sm: .85, wh: .55, dk: .7, ey: .6, slim: .55, big: .45, small: .3, nose: .3 }]];
+const AU = { style: 'clear', k: 70 };
+function autoBeauty(src, faces, style, k) {
+  const p = AU_STYLES.find(s => s[0] === style)[2], f = v => (v || 0) * k;
+  let id = getData(src); bSmooth(id, faces, f(p.sm)); bWhiten(id, faces, f(p.wh)); bDarkCircle(id, faces, f(p.dk)); bBrightEyes(id, faces, f(p.ey));
+  const c = putData(id); return applyWarps(c, faceWarps(faces, c.width, c.height, { slim: f(p.slim), eyes: f(p.big), small: f(p.small), nose: f(p.nose) }));
+}
+TOOLS.auto = {
+  name: '一鍵美顏', heavy: true,
+  async init() { AU.style = 'clear'; AU.k = 70; const f = await needFaces(true); if (f === false) return false; AU.faces = f; refreshUI(); this.pv(); },
+  ui() { return chips(AU_STYLES.map(s => [s[0], s[1]]), AU.style, 'as') + sl('auK', '程度', 0, 100, AU.k); },
+  bind(r) { on(r, '[data-as]', b => { AU.style = b.dataset.as; refreshUI(); this.pv(); }); $('#auK', r).addEventListener('input', e => { AU.k = +e.target.value; this.pv(); }); },
+  pv() { schedulePreview(() => asPreview(autoBeauty(proxy(), AU.faces, AU.style, AU.k / 100), pk())); },
+  async apply(task) { if (!AU.k) return null; task.status('處理原尺寸照片…'); await sleep(30); return autoBeauty(S.img, AU.faces, AU.style, AU.k / 100); },
+};
+
+/* 祛痘 */
+const AC = { size: 'm' };
+TOOLS.acne = {
+  name: '祛痘', touch: true, hint: '點一下痘痘或斑點就會消失',
+  async init() { AC.work = cloneCanvas(S.img); AC.n = 0; const f = await runTask('辨識臉部', t => getFaces(t)); AC.fw = f && f.length ? fInfo(f[0], S.img.width, S.img.height).w : Math.min(S.img.width, S.img.height) * .4; setPreview(asPreview(AC.work, 1)); },
+  ui() { return chips([['s', '小'], ['m', '中'], ['l', '大']], AC.size, 'az') + `<p class="note">放大畫面再點會更準。已處理 ${AC.n || 0} 處。</p>`; },
+  bind(r) { on(r, '[data-az]', b => { AC.size = b.dataset.az; refreshUI(); }); },
+  down(p) { AC.p = p; return true; },
+  move() { },
+  up(p, cancel) { if (cancel || !AC.p) return; const r = AC.fw * ({ s: .018, m: .03, l: .05 })[AC.size]; healSpot(AC.work, AC.p.x, AC.p.y, r); AC.n++; AC.p = null; render(); refreshUI(); },
+  apply() { return AC.n ? AC.work : null; },
+  close() { AC.work = null; },
+};
+
+/* 臉型（瘦臉、小臉、大眼、瘦鼻、下巴、額頭） */
+const SH_LIST = [['slim', '瘦臉', 0, 100], ['small', '小臉', 0, 100], ['eyes', '大眼', 0, 100], ['nose', '瘦鼻', 0, 100], ['chin', '下巴', -100, 100], ['forehead', '額頭', -100, 100]];
+const SH = { k: 'slim', v: {} };
+function shapeRun(src, faces) { const p = {}; SH_LIST.forEach(([k]) => p[k] = (SH.v[k] || 0) / 100); return applyWarps(src, faceWarps(faces, src.width, src.height, p)); }
+TOOLS.shape = {
+  name: '臉型', heavy: true,
+  async init(param) { SH.v = {}; SH.k = param || 'slim'; const f = await needFaces(); if (f === false) return false; SH.faces = f; refreshUI(); },
+  ui() { const it = SH_LIST.find(s => s[0] === SH.k); return chips(SH_LIST.map(([k, l]) => [k, l + (SH.v[k] ? '•' : '')]), SH.k, 'sk') + sl('shV', it[1], it[2], it[3], SH.v[SH.k] || 0) + (it[2] < 0 ? '<p class="note">往右拉變長，往左拉變短。</p>' : ''); },
+  bind(r) { on(r, '[data-sk]', b => { SH.k = b.dataset.sk; refreshUI(); }); $('#shV', r).addEventListener('input', e => { SH.v[SH.k] = +e.target.value; schedulePreview(() => asPreview(shapeRun(proxy(), SH.faces), pk())); }); },
+  async apply(task) { if (!Object.values(SH.v).some(v => v)) return null; task.status('處理原尺寸照片…'); await sleep(30); return shapeRun(S.img, SH.faces); },
+};
+
+/* 美妝 */
+const MK_PAL = {
+  lip: ['#c2185b', '#e53950', '#d4505e', '#ff6f91', '#b7414f', '#a0302f', '#8e244d', '#e98074'],
+  blush: ['#ff8fa3', '#ff9e7a', '#f48fb1', '#ffab91', '#e57373', '#ce93d8'],
+  brow: ['#3b2a22', '#5a3d2b', '#6d4c41', '#2b2b2b', '#8d6e63'],
+  shadow: ['#b5838d', '#c97b63', '#8e7dbe', '#a1887f', '#e5989b', '#6d597a'],
+  contour: ['#7a4b3a', '#8d6e63', '#6d4c41'],
+};
+const MK_NAMES = [['lip', '口紅'], ['blush', '腮紅'], ['brow', '眉毛'], ['shadow', '眼影'], ['contour', '修容']];
+const MK = { k: 'lip', lip: { c: '#e53950', a: 0 }, blush: { c: '#ff8fa3', a: 0 }, brow: { c: '#5a3d2b', a: 0 }, shadow: { c: '#b5838d', a: 0 }, contour: { c: '#7a4b3a', a: 0 } };
+TOOLS.makeup = {
+  name: '美妝', heavy: true,
+  async init(param) { MK_NAMES.forEach(([k]) => MK[k].a = 0); MK.k = param || 'lip'; MK[MK.k].a = .6; const f = await needFaces(); if (f === false) return false; MK.faces = f; refreshUI(); this.pv(); },
+  ui() { const it = MK[MK.k]; return chips(MK_NAMES.map(([k, l]) => [k, l + (MK[k].a ? '•' : '')]), MK.k, 'mkk') + swatches(MK_PAL[MK.k], it.c, 'mkc') + sl('mkA', '濃淡', 0, 100, Math.round(it.a * 100)); },
+  bind(r) {
+    on(r, '[data-mkk]', b => { MK.k = b.dataset.mkk; refreshUI(); });
+    on(r, '[data-mkc]', b => { MK[MK.k].c = b.dataset.mkc; if (!MK[MK.k].a) MK[MK.k].a = .6; refreshUI(); this.pv(); });
+    $('#mkA', r).addEventListener('input', e => { MK[MK.k].a = +e.target.value / 100; this.pv(); });
+  },
+  pv() { schedulePreview(() => asPreview(applyMakeup(proxy(), MK.faces, MK), pk())); },
+  async apply(task) { if (!MK_NAMES.some(([k]) => MK[k].a)) return null; task.status('處理原尺寸照片…'); await sleep(30); return applyMakeup(S.img, MK.faces, MK); },
+};
+
+/* 身材 */
+const BD = { k: 'slim', v: {} };
+function bodyRun(src, pose) {
+  const W = src.width, H = src.height; let out = src;
+  if (pose && (BD.v.slim || BD.v.waist)) out = applyWarps(out, bodyWarps(pose, W, H, { slim: (BD.v.slim || 0) / 100, waist: (BD.v.waist || 0) / 100 }));
+  if (BD.v.tall) { const y0 = pose ? poseInfo(pose, W, H).hp.y - H * .02 : H * .55; out = stretchLegs(out, y0, BD.v.tall / 100); }
+  return out;
+}
+TOOLS.body = {
+  name: '身材', heavy: true,
+  async init(param) {
+    BD.v = {}; BD.k = param || 'slim';
+    const pose = await runTask('辨識身體', t => getPose(t)); if (pose === undefined) return false;
+    BD.pose = pose; if (!pose) { if (BD.k !== 'tall') { toast('找不到完整的人，瘦身和瘦腰需要拍到上半身到大腿', 'err'); return false; } toast('找不到人，增高會從畫面中間偏下開始拉長'); }
+    refreshUI();
+  },
+  ui() { const L = [['slim', '瘦身'], ['waist', '瘦腰'], ['tall', '增高']]; return chips(L.map(([k, l]) => [k, l + (BD.v[k] ? '•' : '')]), BD.k, 'bk') + sl('bdV', L.find(x => x[0] === BD.k)[1], 0, 100, BD.v[BD.k] || 0) + '<p class="note">背景有直線（門框、地板）時拉太多會變形，建議適量。</p>'; },
+  bind(r) { on(r, '[data-bk]', b => { BD.k = b.dataset.bk; refreshUI(); }); $('#bdV', r).addEventListener('input', e => { if (BD.k !== 'tall' && !BD.pose) return; BD.v[BD.k] = +e.target.value; schedulePreview(() => asPreview(bodyRun(proxy(), BD.pose), pk())); }); },
+  async apply(task) { if (!Object.values(BD.v).some(v => v)) return null; task.status('處理原尺寸照片…'); await sleep(30); return bodyRun(S.img, BD.pose); },
+};
+/* ========== 選檔 ========== */
+function pickFile(sel, multiple = false) {
+  return new Promise(res => {
+    const inp = $(sel); inp.value = '';
+    inp.onchange = () => { const fs = [...inp.files]; res(multiple ? fs : fs[0] || null); };
+    inp.oncancel = () => res(multiple ? [] : null);
+    inp.click();
+  });
+}
+
+/* ========== 首頁 ========== */
+const HOME_GRID = [['collage', '拼圖', 'collage'], ['poster', '海報模板', 'poster'], ['idphoto', '證件照', 'idphoto'], ['edit:erase', 'AI 消除', 'erase'], ['edit:matte', '一鍵摳圖', 'matte'], ['edit:upscale', '變清晰', 'upscale'], ['beauty:makeup', '美妝', 'makeup'], ['beauty:body', '瘦身增高', 'body']];
+$('#homeGrid').innerHTML = HOME_GRID.map(([go, l, k]) => `<button class="gi" data-go="${go}"><i>${ic(k)}</i>${l}</button>`).join('');
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-go]'); if (!b || currentTask) return;
+  const go = b.dataset.go;
+  if (go === 'collage') return startCollage();
+  if (go === 'poster') return startPoster();
+  if (go === 'idphoto') return startID();
+  const [grp, tool] = go.split(':');
+  const f = await pickFile('#fImg'); if (!f) return;
+  try { setDocument(await loadPhoto(f)); } catch (err) { console.error(err); return toast('無法讀取這張照片', 'err'); }
+  S.grp = grp; renderTabs(); enterScreen('editor');
+  if (tool) { const t = TABS[grp].find(x => x[0] === tool || x[0].startsWith(tool + ':')) || [tool, '']; setTimeout(() => openTool(t[0], t[1]), 60); }
+});
+function enterScreen(id) { show(id); history.pushState({ s: id }, ''); }
+window.addEventListener('popstate', () => {
+  if (currentTask) { history.pushState({}, ''); return; }
+  if (S.tool) { closeTool(false); history.pushState({}, ''); return; }
+  show('home');
+});
+$('#eBack').onclick = () => {
+  if (S.tool) return closeTool(false);
+  if (S.hist.length && !confirm('回到首頁會放棄這張照片的編輯，確定嗎？')) return;
+  history.back();
+};
+$('#eUndo').onclick = undo; $('#eRedo').onclick = redo;
+$('#eSave').onclick = () => { if (S.tool) return toast('請先按 ✓ 套用或 ✕ 取消目前的工具'); if (S.img) saveCanvas(S.img); };
+
+/* ========== 子畫面（拼圖、海報、證件照） ========== */
+const sv = $('#sv'), svx = sv.getContext('2d');
+const SUB = { canvas: null, view: { s: 1, x: 0, y: 0 }, mode: '' };
+SUB.resize = () => { const r = $('#sStage').getBoundingClientRect(); sv.width = Math.max(1, r.width * DPR); sv.height = Math.max(1, r.height * DPR); SUB.draw(); };
+SUB.draw = () => {
+  svx.setTransform(1, 0, 0, 1, 0, 0); svx.clearRect(0, 0, sv.width, sv.height); const c = SUB.canvas; if (!c) return;
+  const r = $('#sStage').getBoundingClientRect(), s = Math.min((r.width - 28) / c.width, (r.height - 28) / c.height);
+  SUB.view = { s, x: (r.width - c.width * s) / 2, y: (r.height - c.height * s) / 2 };
+  svx.setTransform(DPR * s, 0, 0, DPR * s, DPR * SUB.view.x, DPR * SUB.view.y);
+  checker.setTransform(new DOMMatrix().scale(1 / s)); svx.fillStyle = checker; svx.fillRect(0, 0, c.width, c.height);
+  svx.imageSmoothingQuality = 'high'; svx.drawImage(c, 0, 0); SUB.overlay?.(svx, s);
+};
+function openSub(mode, title, nextLabel) { SUB.mode = mode; SUB.overlay = null; SUB.down = SUB.move = SUB.up = null; $('#sTitle').textContent = title; $('#sNext').textContent = nextLabel; enterScreen('sub'); }
+$('#sBack').onclick = () => history.back();
+$('#sNext').onclick = () => SUB.next?.();
+const sptr = new Map(); let sg = null;
+sv.addEventListener('pointerdown', e => { sv.setPointerCapture(e.pointerId); sptr.set(e.pointerId, { x: e.clientX, y: e.clientY }); const p = subPt(e); if (sptr.size === 1) { sg = { p0: p, last: p }; SUB.down?.(p); } else if (sptr.size === 2) { const [a, b] = [...sptr.values()]; sg = { pinch: true, d0: Math.hypot(a.x - b.x, a.y - b.y) }; SUB.pinchStart?.(); } });
+sv.addEventListener('pointermove', e => { if (!sptr.has(e.pointerId) || !sg) return; sptr.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (sg.pinch && sptr.size >= 2) { const [a, b] = [...sptr.values()]; SUB.pinch?.(Math.hypot(a.x - b.x, a.y - b.y) / sg.d0); return; } const p = subPt(e); SUB.move?.(p, sg.last); sg.last = p; });
+const sEnd = e => { if (!sptr.has(e.pointerId)) return; sptr.delete(e.pointerId); if (sptr.size === 0) { if (sg && !sg.pinch) SUB.up?.(sg.last, sg.p0); sg = null; } };
+sv.addEventListener('pointerup', sEnd); sv.addEventListener('pointercancel', sEnd);
+function subPt(e) { const r = sv.getBoundingClientRect(); return { x: (e.clientX - r.left - SUB.view.x) / SUB.view.s, y: (e.clientY - r.top - SUB.view.y) / SUB.view.s }; }
+function coverDraw(ctx, img, x, y, w, h, o = { dx: 0, dy: 0, z: 1 }) {
+  const k = Math.max(w / img.width, h / img.height) * (o.z || 1), dw = img.width * k, dh = img.height * k;
+  const mx = (dw - w) / 2, my = (dh - h) / 2; o.dx = clamp(o.dx || 0, -mx, mx); o.dy = clamp(o.dy || 0, -my, my);
+  ctx.drawImage(img, x + (w - dw) / 2 + o.dx, y + (h - dh) / 2 + o.dy, dw, dh);
+}
+
+/* ---------- 拼圖 ---------- */
+const CO = { imgs: [], li: 0, ratio: 1, gap: 14, rad: 0, bg: '#ffffff', off: [], sel: -1 };
+function partitions(n, maxParts = 3, maxEach = 4) {
+  const out = []; const rec = (left, parts) => { if (!left) { if (parts.length) out.push(parts); return; } if (parts.length >= maxParts) return; for (let k = 1; k <= Math.min(maxEach, left); k++) rec(left - k, [...parts, k]); };
+  rec(n, []); return out.sort((a, b) => Math.abs(a.length - 2) - Math.abs(b.length - 2));
+}
+function layoutsFor(n) {
+  if (n === 1) return [[[0, 0, 1, 1]]];
+  const L = [], seen = new Set();
+  partitions(n).forEach(parts => {
+    const rows = parts.map((c, ri) => [...Array(c)].map((_, ci) => [ci / c, ri / parts.length, 1 / c, 1 / parts.length])).flat();
+    const cols = parts.map((c, ci) => [...Array(c)].map((_, ri) => [ci / parts.length, ri / c, 1 / parts.length, 1 / c])).flat();
+    [rows, cols].forEach(l => { const k = JSON.stringify(l); if (!seen.has(k)) { seen.add(k); L.push(l); } });
+  });
+  return L.slice(0, 10);
+}
+function coCells(W, H) { const g = CO.gap / 1000 * Math.min(W, H); return layoutsFor(CO.imgs.length)[CO.li].map(([x, y, w, h]) => ({ x: g + x * (W - g), y: g + y * (H - g), w: w * (W - g) - g, h: h * (H - g) - g })); }
+function coRender(long = 1600) {
+  const W = CO.ratio >= 1 ? long : Math.round(long * CO.ratio), H = CO.ratio >= 1 ? Math.round(long / CO.ratio) : long;
+  const c = mkCanvas(W, H), x = c.getContext('2d'); x.fillStyle = CO.bg; x.fillRect(0, 0, W, H);
+  const k = W / (SUB.canvas ? SUB.canvas.width : W);
+  coCells(W, H).forEach((r, i) => { x.save(); x.beginPath(); x.roundRect(r.x, r.y, r.w, r.h, CO.rad / 100 * Math.min(r.w, r.h) * .5); x.clip(); const o = CO.off[i]; const tmp = { dx: o.dx * k, dy: o.dy * k, z: o.z }; coverDraw(x, CO.imgs[i], r.x, r.y, r.w, r.h, tmp); o.dx = tmp.dx / k; o.dy = tmp.dy / k; x.restore(); });
+  return c;
+}
+async function startCollage() {
+  const fs = await pickFile('#fMulti', true); if (!fs.length) return;
+  if (fs.length < 2) toast('一張也可以，但拼圖通常選 2–9 張');
+  const list = fs.slice(0, 9); if (fs.length > 9) toast('最多 9 張，已取前 9 張');
+  const imgs = await runTask('讀取照片', async task => { const a = []; for (let i = 0; i < list.length; i++) { task.progress(i / list.length, `第 ${i + 1} / ${list.length} 張`); a.push(fitInto(await loadPhoto(list[i]), 1600)); } return a; });
+  if (!imgs) return;
+  Object.assign(CO, { imgs, li: 0, off: imgs.map(() => ({ dx: 0, dy: 0, z: 1 })), sel: -1 });
+  openSub('collage', '拼圖', '下一步'); coUI(); coUpdate();
+  SUB.down = p => { const cells = coCells(SUB.canvas.width, SUB.canvas.height); CO.sel = cells.findIndex(r => p.x > r.x && p.x < r.x + r.w && p.y > r.y && p.y < r.y + r.h); CO.z0 = CO.sel >= 0 ? CO.off[CO.sel].z : 1; coUI(); SUB.draw(); };
+  SUB.move = (p, last) => { if (CO.sel < 0) return; const o = CO.off[CO.sel]; o.dx += p.x - last.x; o.dy += p.y - last.y; coUpdate(); };
+  SUB.pinchStart = () => { if (CO.sel >= 0) CO.z0 = CO.off[CO.sel].z; };
+  SUB.pinch = k => { if (CO.sel < 0) return; CO.off[CO.sel].z = clamp(CO.z0 * k, 1, 5); coUpdate(); };
+  SUB.overlay = (ctx, s) => { if (CO.sel < 0) return; const r = coCells(SUB.canvas.width, SUB.canvas.height)[CO.sel]; if (!r) return; ctx.strokeStyle = '#ff4d8d'; ctx.lineWidth = 3 / s; ctx.strokeRect(r.x, r.y, r.w, r.h); };
+  SUB.next = () => { const out = coRender(2048); setDocument(out); S.grp = 'edit'; renderTabs(); show('editor'); };
+}
+function coUpdate() { SUB.canvas = coRender(1000); SUB.draw(); }
+function coUI() {
+  const L = layoutsFor(CO.imgs.length);
+  $('#sOpts').innerHTML = `<div class="thumbs">${L.map((l, i) => `<button class="th ${CO.li === i ? 'on' : ''}" data-cl="${i}"><canvas width="64" height="64" data-lt="${i}"></canvas></button>`).join('')}</div>
+    ${chips([[1, '1:1'], [.75, '3:4'], [.5625, '9:16'], [1.3333, '4:3']], CO.ratio, 'cr')}
+    ${sl('coG', '間距', 0, 60, CO.gap)}${sl('coR', '圓角', 0, 100, CO.rad)}
+    ${swatches(['#ffffff', '#f6f1f3', '#ffe3ee', '#ece8ff', '#fff4d6', '#222222'], CO.bg, 'cb')}
+    ${CO.sel >= 0 ? `<div class="row"><button class="btn" id="coRep">替換選取的照片</button></div>` : '<p class="note">點一格照片後可以拖曳調整位置，雙指縮放。</p>'}`;
+  bindSliders($('#sOpts'));
+  $$('canvas[data-lt]').forEach(c => { const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 64, 64); x.fillStyle = '#ffc2d8'; L[+c.dataset.lt].forEach(([a, b, w, h]) => { x.beginPath(); x.roundRect(a * 64 + 3, b * 64 + 3, w * 64 - 4, h * 64 - 4, 3); x.fill(); }); });
+  on($('#sOpts'), '[data-cl]', b => { CO.li = +b.dataset.cl; CO.off = CO.imgs.map(() => ({ dx: 0, dy: 0, z: 1 })); coUI(); coUpdate(); });
+  on($('#sOpts'), '[data-cr]', b => { CO.ratio = +b.dataset.cr; coUI(); coUpdate(); });
+  on($('#sOpts'), '[data-cb]', b => { CO.bg = b.dataset.cb; coUI(); coUpdate(); });
+  $('#coG').addEventListener('input', e => { CO.gap = +e.target.value; coUpdate(); });
+  $('#coR').addEventListener('input', e => { CO.rad = +e.target.value; coUpdate(); });
+  $('#coRep') && ($('#coRep').onclick = async () => { const f = await pickFile('#fImg'); if (!f) return; CO.imgs[CO.sel] = fitInto(await loadPhoto(f), 1600); CO.off[CO.sel] = { dx: 0, dy: 0, z: 1 }; coUpdate(); });
+}
+
+/* ---------- 海報模板 ---------- */
+const TPLS = [
+  { id: 'bday', name: '生日', W: 1080, H: 1350, t: 'Happy Birthday', s: '願你每天都閃閃發光', draw(x, W, H, ph, d) { const g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#ffd1e3'); g.addColorStop(1, '#ffb4cf'); x.fillStyle = g; x.fillRect(0, 0, W, H); const cs = ['#fff', '#ff4d8d', '#ffd23f', '#8f7cff']; for (let i = 0; i < 60; i++) { x.fillStyle = cs[i % 4]; x.globalAlpha = .8; x.beginPath(); x.arc((Math.sin(i * 12.9) * .5 + .5) * W, (Math.cos(i * 7.3) * .5 + .5) * H, 5 + (i % 4) * 3, 0, 7); x.fill(); } x.globalAlpha = 1; x.save(); x.shadowColor = 'rgba(180,40,90,.25)'; x.shadowBlur = 40; x.fillStyle = '#fff'; x.beginPath(); x.roundRect(80, 250, W - 160, 820, 48); x.fill(); x.restore(); x.save(); x.beginPath(); x.roundRect(100, 270, W - 200, 780, 36); x.clip(); coverDraw(x, ph, 100, 270, W - 200, 780); x.restore(); x.textAlign = 'center'; x.fillStyle = '#fff'; x.shadowColor = 'rgba(200,40,100,.45)'; x.shadowBlur = 18; x.font = `italic 900 104px "Noto Serif",Georgia,serif`; x.fillText(d.t, W / 2, 190); x.shadowBlur = 0; x.fillStyle = '#c2185b'; x.font = `700 54px "Noto Sans TC",sans-serif`; x.fillText(d.s, W / 2, 1160); x.font = `500 34px "Noto Sans TC",sans-serif`; x.fillStyle = '#d14f80'; x.fillText(d.d, W / 2, 1230); } },
+  { id: 'vlog', name: 'Vlog 封面', W: 1080, H: 1920, t: '週末小旅行', s: '跟我一起去海邊吧', draw(x, W, H, ph, d) { coverDraw(x, ph, 0, 0, W, H); const g = x.createLinearGradient(0, H * .5, 0, H); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.72)'); x.fillStyle = g; x.fillRect(0, 0, W, H); x.fillStyle = '#ff4d8d'; x.beginPath(); x.roundRect(80, H - 560, 190, 66, 33); x.fill(); x.fillStyle = '#fff'; x.font = `900 38px "Noto Sans TC",sans-serif`; x.textAlign = 'center'; x.fillText('VLOG', 175, H - 514); x.textAlign = 'left'; x.font = `900 128px "Noto Sans TC",sans-serif`; x.fillText(d.t, 76, H - 340); x.font = `500 52px "Noto Sans TC",sans-serif`; x.fillStyle = '#ffe3ee'; x.fillText(d.s, 80, H - 240); x.font = `500 36px "Noto Sans TC",sans-serif`; x.fillStyle = '#ffffffb0'; x.fillText(d.d, 80, H - 170); } },
+  { id: 'travel', name: '旅行明信片', W: 1080, H: 1350, t: '你好，京都', s: '把這一刻寄給未來的自己', draw(x, W, H, ph, d) { x.fillStyle = '#f4efe6'; x.fillRect(0, 0, W, H); x.save(); x.translate(W / 2, 560); x.rotate(-.035); x.shadowColor = 'rgba(0,0,0,.18)'; x.shadowBlur = 30; x.fillStyle = '#fff'; x.fillRect(-440, -420, 880, 840); x.shadowBlur = 0; coverDraw(x, ph, -410, -390, 820, 780); x.restore(); x.strokeStyle = '#c0504d'; x.lineWidth = 6; x.beginPath(); x.arc(W - 150, 150, 86, 0, 7); x.stroke(); x.fillStyle = '#c0504d'; x.font = `700 30px "Noto Sans TC",sans-serif`; x.textAlign = 'center'; x.fillText(d.d, W - 150, 162); x.fillStyle = '#3a3236'; x.font = `700 96px "LXGW WenKai TC",cursive`; x.fillText(d.t, W / 2, 1120); x.font = `400 44px "LXGW WenKai TC",cursive`; x.fillStyle = '#6d6067'; x.fillText(d.s, W / 2, 1200); } },
+  { id: 'food', name: '美食記錄', W: 1080, H: 1350, t: '今日甜點', s: '草莓鮮奶油蛋糕 · 好吃到想再來', draw(x, W, H, ph, d) { x.fillStyle = '#fff8ee'; x.fillRect(0, 0, W, H); coverDraw(x, ph, 0, 0, W, 900); x.fillStyle = '#ff4d8d'; x.beginPath(); x.roundRect(70, 840, 170, 60, 30); x.fill(); x.fillStyle = '#fff'; x.font = `900 32px "Noto Sans TC",sans-serif`; x.textAlign = 'center'; x.fillText('MENU', 155, 881); x.textAlign = 'left'; x.fillStyle = '#3a2a22'; x.font = `900 100px "Noto Serif TC",serif`; x.fillText(d.t, 70, 1040); x.setLineDash([10, 12]); x.strokeStyle = '#d8bfa8'; x.lineWidth = 4; x.beginPath(); x.moveTo(70, 1090); x.lineTo(W - 70, 1090); x.stroke(); x.setLineDash([]); x.font = `500 44px "Noto Sans TC",sans-serif`; x.fillStyle = '#7a5b4a'; x.fillText(d.s, 70, 1170); x.font = `500 32px "Noto Sans TC",sans-serif`; x.fillStyle = '#b09080'; x.fillText(d.d, 70, 1240); } },
+  { id: 'mag', name: '雜誌封面', W: 1080, H: 1350, t: 'POCHI', s: '春日穿搭特輯', draw(x, W, H, ph, d) { coverDraw(x, ph, 0, 0, W, H); const g = x.createLinearGradient(0, 0, 0, 420); g.addColorStop(0, 'rgba(0,0,0,.4)'); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(0, 0, W, 420); x.fillStyle = '#fff'; x.textAlign = 'center'; let fs = 230; x.font = `italic 900 ${fs}px "Noto Serif",Georgia,serif`; while (x.measureText(d.t).width > W - 80 && fs > 60) { fs -= 10; x.font = `italic 900 ${fs}px "Noto Serif",Georgia,serif`; } x.textBaseline = 'top'; x.fillText(d.t, W / 2, 40); x.textBaseline = 'alphabetic'; x.textAlign = 'left'; x.shadowColor = 'rgba(0,0,0,.4)'; x.shadowBlur = 12; x.font = `900 64px "Noto Sans TC",sans-serif`; x.fillText(d.s, 60, H - 150); x.font = `500 34px "Noto Sans TC",sans-serif`; x.fillText(d.d, 60, H - 90); } },
+  { id: 'diary', name: '拍立得日記', W: 1080, H: 1350, t: '今天也要開心', s: 'with love', draw(x, W, H, ph, d) { x.fillStyle = '#efeaff'; x.fillRect(0, 0, W, H); x.save(); x.translate(W / 2, 600); x.rotate(.03); x.shadowColor = 'rgba(0,0,0,.18)'; x.shadowBlur = 28; x.fillStyle = '#fff'; x.fillRect(-380, -440, 760, 920); x.shadowBlur = 0; coverDraw(x, ph, -340, -400, 680, 680); x.fillStyle = '#3a3236'; x.font = `700 64px "LXGW WenKai TC",cursive`; x.textAlign = 'center'; x.fillText(d.t, 0, 390); x.restore(); x.fillStyle = 'rgba(255,170,200,.8)'; x.save(); x.translate(W / 2 - 250, 170); x.rotate(-.4); x.fillRect(-110, -30, 220, 60); x.restore(); x.fillStyle = 'rgba(160,140,255,.7)'; x.save(); x.translate(W / 2 + 270, 1020); x.rotate(-.5); x.fillRect(-110, -30, 220, 60); x.restore(); x.fillStyle = '#8f7cff'; x.textAlign = 'center'; x.font = `italic 700 54px "Noto Serif",Georgia,serif`; x.fillText(d.s, W / 2, 1200); x.font = `500 32px "Noto Sans TC",sans-serif`; x.fillText(d.d, W / 2, 1260); } },
+];
+const PO = { ti: 0, ph: null, data: {} };
+function poRender(scale = 1) { const T = TPLS[PO.ti], c = mkCanvas(T.W * scale, T.H * scale), x = c.getContext('2d'); x.scale(scale, scale); T.draw(x, T.W, T.H, PO.ph, PO.data); return c; }
+async function startPoster() {
+  const f = await pickFile('#fImg'); if (!f) return;
+  try { PO.ph = fitInto(await loadPhoto(f), 2000); } catch { return toast('無法讀取這張照片', 'err'); }
+  const d = new Date(); PO.date = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+  poSelect(0); openSub('poster', '海報模板', '下一步'); poUI(); poUpdate();
+  document.fonts?.ready.then(poUpdate);
+  SUB.next = () => { setDocument(poRender(1)); S.grp = 'edit'; renderTabs(); show('editor'); };
+}
+function poSelect(i) { PO.ti = i; const T = TPLS[i]; PO.data = { t: T.t, s: T.s, d: PO.date }; }
+function poUpdate() { SUB.canvas = poRender(.6); SUB.draw(); }
+function poUI() {
+  $('#sOpts').innerHTML = `<div class="thumbs">${TPLS.map((t, i) => `<button class="th ${PO.ti === i ? 'on' : ''}" data-pt="${i}"><canvas width="96" height="96" data-pp="${i}"></canvas>${t.name}</button>`).join('')}</div>
+    <div class="fields"><input id="poT" value="${PO.data.t.replace(/"/g, '&quot;')}" placeholder="標題"><input id="poS" value="${PO.data.s.replace(/"/g, '&quot;')}" placeholder="副標題"><input id="poD" value="${PO.data.d}" placeholder="日期或地點"></div>
+    <p class="note">下一步會進入編輯，還可以再加文字、貼紙或濾鏡。</p>`;
+  $$('canvas[data-pp]').forEach(c => { const T = TPLS[+c.dataset.pp], x = c.getContext('2d'), k = Math.min(96 / T.W, 96 / T.H); x.fillStyle = '#eee'; x.fillRect(0, 0, 96, 96); x.save(); x.translate((96 - T.W * k) / 2, (96 - T.H * k) / 2); x.scale(k, k); T.draw(x, T.W, T.H, PO.ph, { t: T.t, s: T.s, d: PO.date }); x.restore(); });
+  on($('#sOpts'), '[data-pt]', b => { poSelect(+b.dataset.pt); poUI(); poUpdate(); });
+  ['T', 'S', 'D'].forEach(k => $('#po' + k).addEventListener('input', e => { PO.data[k.toLowerCase()] = e.target.value; poUpdate(); }));
+}
+
+/* ---------- 證件照 ---------- */
+const ID_SIZES = [['2in', '2 吋', 35, 45, .72], ['1in', '1 吋', 28, 35, .7], ['pass', '護照／身分證', 35, 45, .76]];
+const ID_BG = [['#ffffff', '白'], ['#dce9f7', '淺藍'], ['#3a74c4', '藍'], ['#d0312d', '紅'], ['#ececec', '淺灰']];
+const ID = { size: 'pass', bg: '#ffffff', sheet: false, src: null, fg: null, face: null, adj: { y: 0, z: 1 } };
+function idSingle() {
+  const sz = ID_SIZES.find(s => s[0] === ID.size), W = Math.round(sz[2] / 25.4 * 300), H = Math.round(sz[3] / 25.4 * 300);
+  const f = ID.face, iw = ID.src.width, ih = ID.src.height, top0 = f[10].y * ih, chin = f[152].y * ih, crown = top0 - (chin - top0) * .48, cx = f[168].x * iw;
+  const s = H * sz[4] / (chin - crown) * ID.adj.z, topM = H * .07 + ID.adj.y;
+  const c = mkCanvas(W, H), x = c.getContext('2d'); x.fillStyle = ID.bg; x.fillRect(0, 0, W, H); x.imageSmoothingQuality = 'high';
+  x.drawImage(ID.fg, W / 2 - cx * s, topM - crown * s, iw * s, ih * s); return c;
+}
+function idSheet(one) {
+  const W = 1800, H = 1200, g = 20, c = mkCanvas(W, H), x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+  const cols = Math.max(1, Math.floor((W - g) / (one.width + g))), rows = Math.max(1, Math.floor((H - g) / (one.height + g)));
+  const ox = (W - cols * one.width - (cols - 1) * g) / 2, oy = (H - rows * one.height - (rows - 1) * g) / 2;
+  for (let r = 0; r < rows; r++) for (let k = 0; k < cols; k++) { const px = ox + k * (one.width + g), py = oy + r * (one.height + g); x.drawImage(one, px, py); x.strokeStyle = '#cfcfcf'; x.lineWidth = 1; x.strokeRect(px - .5, py - .5, one.width + 1, one.height + 1); }
+  return c;
+}
+function idUpdate() { const one = idSingle(); SUB.canvas = ID.sheet ? idSheet(one) : one; SUB.draw(); }
+async function startID() {
+  const f = await pickFile('#fImg'); if (!f) return;
+  const ok = await runTask('製作證件照', async task => {
+    const src = fitInto(await loadPhoto(f), 2000);
+    const faces = await getFaces(task, src); task.check();
+    if (!faces.length) throw new Error('找不到臉，請用正面、光線均勻的照片');
+    const r = await segment(src, 'modnet', task); task.check();
+    const fg = cloneCanvas(src), x = fg.getContext('2d'); x.globalCompositeOperation = 'destination-in'; x.imageSmoothingQuality = 'high'; x.drawImage(maskToCanvas(r.mask, r.w, r.h), 0, 0, src.width, src.height);
+    Object.assign(ID, { src, fg, face: faces[0], adj: { y: 0, z: 1 } }); return true;
+  });
+  if (!ok) return;
+  openSub('idphoto', '證件照', '儲存'); idUI(); idUpdate();
+  SUB.next = () => saveCanvas(ID.sheet ? idSheet(idSingle()) : idSingle(), 'PochiEdit_證件照');
+}
+function idUI() {
+  $('#sOpts').innerHTML = chips(ID_SIZES.map(s => [s[0], s[1]]), ID.size, 'is') +
+    `<div class="chips" style="gap:12px">${ID_BG.map(([c, l]) => `<button class="sw ${ID.bg === c ? 'on' : ''}" data-ib="${c}" style="background:${c}" aria-label="${l}"></button>`).join('')}</div>` +
+    chips([['0', '單張'], ['1', '4×6 相紙排版']], ID.sheet ? '1' : '0', 'ish') + sl('idY', '上下', -60, 60, ID.adj.y) + sl('idZ', '大小', 80, 120, Math.round(ID.adj.z * 100)) +
+    `<p class="note">台灣護照、身分證：白色背景，頭頂到下巴 3.2–3.6 公分。輸出為 300 dpi，可直接拿去沖印。</p>`;
+  bindSliders($('#sOpts'));
+  on($('#sOpts'), '[data-is]', b => { ID.size = b.dataset.is; idUI(); idUpdate(); });
+  on($('#sOpts'), '[data-ib]', b => { ID.bg = b.dataset.ib; idUI(); idUpdate(); });
+  on($('#sOpts'), '[data-ish]', b => { ID.sheet = b.dataset.ish === '1'; idUI(); idUpdate(); });
+  $('#idY').addEventListener('input', e => { ID.adj.y = +e.target.value; idUpdate(); });
+  $('#idZ').addEventListener('input', e => { ID.adj.z = +e.target.value / 100; idUpdate(); });
+}
+
+/* ========== 初始化 ========== */
+renderTabs();
+history.replaceState({ s: 'home' }, '');
+if (!window.ort) console.warn('onnxruntime 未載入');
+// 面板高度改變時，自動重新計算畫布大小
+new ResizeObserver(() => { if ($('#editor').classList.contains('on')) { const r = $('#eStage').getBoundingClientRect(); if (Math.round(r.width * DPR) !== ev.width || Math.round(r.height * DPR) !== ev.height) { resizeEV(); fitView(); } } }).observe($('#eStage'));
+new ResizeObserver(() => { if ($('#sub').classList.contains('on')) SUB.resize(); }).observe($('#sStage'));
+</script>
+</body>
+</html>
